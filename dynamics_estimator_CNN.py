@@ -1,6 +1,6 @@
 import matlab.engine
 import numpy as np
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, confusion_matrix
 import seaborn as sns
@@ -38,6 +38,10 @@ y = y.flatten()
 z = z.flatten()
 a = a.flatten()
 
+# Encode gait phases (y) into integers
+label_encoder = LabelEncoder()
+y = label_encoder.fit_transform(y)  # Transform gait phases to integers
+
 # Find the minimum length among X, y, and z
 min_length = min(len(X), len(y), len(z), len(a))
 
@@ -64,15 +68,27 @@ y = y[:-2]
 scaler = StandardScaler()
 X_combined_scaled = scaler.fit_transform(X_combined)
 
-# Reshape data for CNN [samples, timesteps, features]
-X_combined_reshaped = X_combined_scaled.reshape((X_combined_scaled.shape[0], 1, X_combined_scaled.shape[1]))
+# *** Fenêtrage des données pour Conv1D ***
+# Fonction pour créer des fenêtres de séquences temporelles
+def create_sequences(data, seq_length):
+    sequences = []
+    for i in range(len(data) - seq_length + 1):
+        sequences.append(data[i:i + seq_length])
+    return np.array(sequences)
+
+# Créer des fenêtres de 10 pas de temps
+seq_length = 10
+X_combined_reshaped = create_sequences(X_combined_scaled, seq_length)
+y_seq = y[seq_length-1:]  # Ajuster les étiquettes pour correspondre à la longueur des séquences
+
+# Vérification des nouvelles formes
+print(f"Shape of X_combined_reshaped: {X_combined_reshaped.shape}")
+print(f"Shape of y_seq: {y_seq.shape}")
+
+# *** Fin du fenêtrage des données pour Conv1D ***
 
 # Split data into training and testing sets
-X_train, X_test, y_train, y_test = train_test_split(X_combined_reshaped, y, test_size=0.2, random_state=42)
-
-# Assurez-vous que les étiquettes sont des entiers
-y_train = y_train.astype(int)
-y_test = y_test.astype(int)
+X_train, X_test, y_train, y_test = train_test_split(X_combined_reshaped, y_seq, test_size=0.2, random_state=42)
 
 # Build the CNN model
 model = Sequential()
@@ -86,7 +102,7 @@ model.add(Dense(4, activation='softmax'))  # Assuming 4 phases of gait
 model.compile(loss='sparse_categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
 
 # Train the model
-model.fit(X_train, y_train, epochs=20, batch_size=32, validation_split=0.2)
+model.fit(X_train, y_train, epochs=100, batch_size=32, validation_split=0.2)
 
 # Predict on the test set
 y_pred = model.predict(X_test)
@@ -98,7 +114,7 @@ print(f"CNN Model Accuracy: {accuracy * 100:.2f}%")
 
 # Confusion matrix
 cm = confusion_matrix(y_test, y_pred)
-class_names = ['FF/MST', 'HO', 'HS', 'MSW']
+class_names = label_encoder.inverse_transform([0, 1, 2, 3])  # Convert encoded labels back to original
 
 # Visualisation de la matrice de confusion
 sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", xticklabels=class_names, yticklabels=class_names)
