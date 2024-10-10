@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 import tensorflow as tf
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Conv1D, MaxPooling1D, Dense, Flatten
+from scipy.interpolate import interp1d
 import time
 
 # Démarrer le chronomètre
@@ -46,26 +47,32 @@ a = a.flatten()
 label_encoder = LabelEncoder()
 y = label_encoder.fit_transform(y)  # Transform gait phases to integers
 
+# Interpolation de la variable a_train (à 60 Hz) vers 100 Hz
+t_60Hz = np.linspace(0, len(a) / 60, len(a))
+t_100Hz = np.linspace(0, len(a) / 60, int(len(a) * 100 / 60))
+interp_a = interp1d(t_60Hz, a, kind='linear')
+a_100Hz = interp_a(t_100Hz)
+
 # Find the minimum length among X, y, and z
-min_length = min(len(X), len(y), len(z), len(a))
+min_length = min(len(X), len(y), len(z), len(a_100Hz))
 
 # Truncate X, y, z, and a to the minimum length
 X = X[:min_length]
 y = y[:min_length]
 z = z[:min_length]
-a = a[:min_length]
+a_100Hz = a_100Hz[:min_length]
 
-a = a[:-1]
-a_derivate = np.diff(a, axis=0)
+a_100Hz = a_100Hz[:-1]
+a_100Hz_derivate = np.diff(a_100Hz, axis=0)
 
 X_combined = np.hstack((X, z.reshape(-1, 1)))
 X_derivative = np.diff(X, axis=0)  # Calcul des dérivées de la force
 
 X_combined = X_combined[:-1]
 X_combined = np.hstack((X_combined, X_derivative))  # Combiner avec les autres caractéristiques
-X_combined = np.hstack((X_combined, a.reshape(-1, 1)))
+X_combined = np.hstack((X_combined, a_100Hz.reshape(-1, 1)))
 X_combined = X_combined[:-1]
-X_combined = np.hstack((X_combined, a_derivate.reshape(-1, 1)))
+X_combined = np.hstack((X_combined, a_100Hz_derivate.reshape(-1, 1)))
 y = y[:-2]
 
 # Standardize the features

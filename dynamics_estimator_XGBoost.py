@@ -71,7 +71,7 @@ X_combined = scaler.fit_transform(X_combined)
 X_train, X_test, y_train, y_test = train_test_split(X_combined, y_encoded, test_size=0.2, random_state=42)
 
 # Initialize XGBoost model with basic parameters
-model = xgb.XGBClassifier(n_estimators=100, learning_rate=0.1, max_depth=5, use_label_encoder=False, eval_metric='mlogloss')
+model = xgb.XGBClassifier(n_estimators=100, learning_rate=0.2, max_depth=5, use_label_encoder=False, eval_metric='mlogloss')
 
 # Train the model
 model.fit(X_train, y_train)

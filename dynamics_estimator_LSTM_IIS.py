@@ -10,6 +10,11 @@ from tensorflow.keras.layers import LSTM, Dense
 from sklearn.metrics import confusion_matrix
 import seaborn as sns
 import matplotlib.pyplot as plt
+from scipy.interpolate import interp1d
+import time
+
+# Démarrer le chronomètre
+start_time = time.time()
 
 # Start MATLAB engine
 eng = matlab.engine.start_matlab()
@@ -40,17 +45,23 @@ y = y.flatten()
 z = z.flatten()
 a = a.flatten()
 
+# Interpolation de la variable a_train (à 60 Hz) vers 100 Hz
+t_60Hz = np.linspace(0, len(a) / 60, len(a))
+t_100Hz = np.linspace(0, len(a) / 60, int(len(a) * 100 / 60))
+interp_a = interp1d(t_60Hz, a, kind='linear')
+a_100Hz = interp_a(t_100Hz)
+
 # Find the minimum length among X, y, and z
-min_length = min(len(X), len(y), len(z), len(a))
+min_length = min(len(X), len(y), len(z), len(a_100Hz))
 
 # Truncate X, y, and z to the minimum length
 X = X[:min_length]
 y = y[:min_length]
 z = z[:min_length]
-a = a[:min_length]
+a_100Hz = a_100Hz[:min_length]
 
-a = a[:-1]
-a_derivate = np.diff(a, axis=0)
+a_100Hz = a_100Hz[:-1]
+a_100Hz_derivate = np.diff(a_100Hz, axis=0)
 
 # Combine the features
 X_combined = np.hstack((X, z.reshape(-1, 1)))
@@ -61,9 +72,9 @@ X_derivative = np.diff(X, axis=0)
 # Prepare the combined feature set
 X_combined = X_combined[:-1]
 X_combined = np.hstack((X_combined, X_derivative))
-X_combined = np.hstack((X_combined, a.reshape(-1, 1)))
+X_combined = np.hstack((X_combined, a_100Hz.reshape(-1, 1)))
 X_combined = X_combined[:-1]
-X_combined = np.hstack((X_combined, a_derivate.reshape(-1, 1)))
+X_combined = np.hstack((X_combined, a_100Hz_derivate.reshape(-1, 1)))
 y = y[:-2]
 
 # Convert data to correct types if necessary
@@ -93,7 +104,7 @@ model.add(Dense(4, activation='softmax'))  # Assuming 4 phases of gait
 model.compile(loss='sparse_categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
 
 # Train the model
-model.fit(X_train, y_train, epochs=50, batch_size=32, validation_split=0.2)
+model.fit(X_train, y_train, epochs=10, batch_size=32, validation_split=0.2)
 
 # Predict on the test set
 y_pred = model.predict(X_test)
@@ -123,6 +134,13 @@ print(y_test_values_count_percent)
 # Confusion Matrix
 cm = confusion_matrix(y_test_phases, y_pred_phases)
 class_names = label_encoder.classes_
+
+# Arrêter le chronomètre
+end_time = time.time()
+
+# Calculer le temps écoulé
+elapsed_time = end_time - start_time
+print(f"Temps d'exécution: {elapsed_time} secondes")
 
 # Visualize confusion matrix
 sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", xticklabels=class_names, yticklabels=class_names)

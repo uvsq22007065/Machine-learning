@@ -50,7 +50,7 @@ q_shank = quaternion(imu_data_shank.QuatW, imu_data_shank.QuatX, imu_data_shank.
 q_foot_interp = quaternion(interp1(t_foot, [imu_data_foot.QuatW, imu_data_foot.QuatX, imu_data_foot.QuatY, imu_data_foot.QuatZ], t_shank));
 
 % Initialisation de l'angle de référence (initial_angle)
-initial_angle = 1.8; % ou une autre valeur calculée au besoin
+initial_angle = 0; % ou une autre valeur calculée au besoin
 
 % Préallocation du tableau des angles de la cheville
 ankle_angles = zeros(1, length(q_shank));

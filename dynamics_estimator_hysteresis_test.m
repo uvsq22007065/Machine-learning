@@ -50,7 +50,7 @@ q_shank = quaternion(imu_data_shank.QuatW, imu_data_shank.QuatX, imu_data_shank.
 q_foot_interp = quaternion(interp1(t_foot, [imu_data_foot.QuatW, imu_data_foot.QuatX, imu_data_foot.QuatY, imu_data_foot.QuatZ], t_shank));
 
 % Initialisation de l'angle de référence (initial_angle)
-initial_angle = 1.8; % ou une autre valeur calculée au besoin
+initial_angle = 0; % ou une autre valeur calculée au besoin
 
 % Préallocation du tableau des angles de la cheville
 ankle_angles = zeros(1, length(q_shank));
@@ -64,17 +64,15 @@ end
 ankle_angles(isnan(ankle_angles)) = 0;
 
 % Filtrage des angles avec un filtre de médiane mobile
-ankle_angles_filt = smoothdata(ankle_angles, 'movmedian', 'SmoothingFactor', 0.1);
+ankle_angles_filt_test = smoothdata(ankle_angles, 'movmedian', 'SmoothingFactor', 0.1);
 
 % Affichage ou exportation des résultats
-disp('Filtered ankle angles:');
-disp(ankle_angles_filt);
-assignin('base','ankle_angles_filt', ankle_angles_filt);
+assignin('base','ankle_angles_filt_test', ankle_angles_filt_test);
 
 figure(1)
 subplot(2,1,1)
 plot(ankle_angles);
-hold on; plot(ankle_angles_filt);
+hold on; plot(ankle_angles_filt_test);
 subplot(2,1,2)
 plot(healthy_angle(:,1),healthy_angle(:,2))
 
