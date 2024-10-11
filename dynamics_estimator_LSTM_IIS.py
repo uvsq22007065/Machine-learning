@@ -104,7 +104,7 @@ model.add(Dense(4, activation='softmax'))  # Assuming 4 phases of gait
 model.compile(loss='sparse_categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
 
 # Train the model
-model.fit(X_train, y_train, epochs=10, batch_size=32, validation_split=0.2)
+model.fit(X_train, y_train, epochs=20, batch_size=32, validation_split=0.2)
 
 # Predict on the test set
 y_pred = model.predict(X_test)
