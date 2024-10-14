@@ -1,142 +1,172 @@
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 from scipy.interpolate import interp1d
-from scipy.spatial.transform import Rotation as R
-from scipy.signal import medfilt, butter, filtfilt
-from scipy.fft import fft
-import scipy.io
-import h5py 
-import numpy as np
+from scipy.signal import butter, lfilter
 
-# Fonction pour convertir un fichier .mat en .npy
-def convert_mat_to_npy(mat_file_path, npy_file_path):
-    # Lire le fichier .mat
-    with h5py.File(mat_file_path, 'r') as f:
-        # Convertir les données en dictionnaire
-        mat_data = {}
-        for key in f.keys():
-            # Si c'est un dataset, on lit les données
-            if isinstance(f[key], h5py.Dataset):
-                mat_data[key] = f[key][()]
-            # Si c'est un groupe, on peut l'ajouter comme un groupe
-            elif isinstance(f[key], h5py.Group):
-                mat_data[key] = {sub_key: f[key][sub_key][()] for sub_key in f[key].keys()}
+# Chargement des données
+data_bags_path = "csv_files/"
+filename = "healthy_walking_treadmill_2kmph.csv"
+filename2 = "healthy_walking_treadmill_2kmph2.csv"
+filename3 = "healthy_walking_treadmill_2d5kmph.csv"
+filename_initial_pos = "healthy_initial_posture_with_noise.csv"
+filename_force_noise = "healthy_treadmill_noise2.csv"
+filename_insole_points = "healthy_determine_points.csv"
 
-    # Sauvegarder le dictionnaire en .npy
-    np.save(npy_file_path, mat_data)
+# Chargement des données
+initial_pos = pd.read_csv(data_bags_path + filename_initial_pos)
+force_noise_calib = pd.read_csv(data_bags_path + filename_force_noise)
+insole_points = pd.read_csv(data_bags_path + filename_insole_points)
+healthy_data = pd.read_csv("healthy_ankle_angle.txt", delim_whitespace=True, header=None)
 
-# Chemins des fichiers .mat et .npy
-file_1_mat_path = "data_bags/healthy_initial_posture_with_noise.mat"
-file_1_npy_path = "data_bags/healthy_initial_posture_with_noise.npy"
+# Initial Posture
+initial_pos['t_foot'] = initial_pos['imu_data_foot.TimeStampGlob']
+initial_pos['t_shank'] = initial_pos['imu_data_shank.TimeStampGlob']
+# Remplacer par une fonction pour calculer les quaternions
+initial_pos['q_foot'] = quaternion(initial_pos[['imu_data_foot.QuatW', 'imu_data_foot.QuatX', 
+                                                 'imu_data_foot.QuatY', 'imu_data_foot.QuatZ']].values)
+initial_pos['q_foot_interp'] = quaternion(interp1d(initial_pos['t_foot'], 
+                                       initial_pos[['imu_data_foot.QuatW', 'imu_data_foot.QuatX', 
+                                       'imu_data_foot.QuatY', 'imu_data_foot.QuatZ']].values, 
+                                       fill_value="extrapolate")(initial_pos['t_shank']))
+initial_pos['q_shank'] = quaternion(initial_pos[['imu_data_shank.QuatW', 'imu_data_shank.QuatX', 
+                                                 'imu_data_shank.QuatY', 'imu_data_shank.QuatZ']].values)
 
-file_2_mat_path = "data_bags/healthy_treadmill_noise2.mat"
-file_2_npy_path = "data_bags/healthy_treadmill_noise2.npy"
+initial_pos['ankle_angles'] = np.array([dist(initial_pos['q_foot_interp'][i], 
+                                              initial_pos['q_shank'][i]) for i in range(len(initial_pos['q_shank']))])
+initial_pos['ankle_angles'][np.isnan(initial_pos['ankle_angles'])] = 0
+initial_pos['ankle_angles_filt'] = smoothdata(initial_pos['ankle_angles'], method='movmedian', 
+                                               smoothing_factor=0.1)
 
-# Conversion des fichiers
-convert_mat_to_npy(file_1_mat_path, file_1_npy_path)
-convert_mat_to_npy(file_2_mat_path, file_2_npy_path)
+compensator = 0.16  # 9 degrees
+initial_angle = np.median(initial_pos['ankle_angles_filt'][5:-5]) + compensator
 
-print("Conversion terminée avec succès !")
+# Angle Estimator
+# Synchronisation des données des IMUs (pied et tibia) et interpolation
+t_foot = initial_pos['imu_data_foot.TimeStampGlob']
+t_shank = initial_pos['imu_data_shank.TimeStampGlob']
 
-# ---- Chargement des données ----
-initial_pos = np.load('data_bags/healthy_initial_posture_with_noise.npy', allow_pickle=True).item()
-force_noise_calib = np.load('data_bags/healthy_treadmill_noise2.npy', allow_pickle=True).item()
+# Création des quaternions pour le pied et le tibia
+q_foot = quaternion(initial_pos[['imu_data_foot.QuatW', 'imu_data_foot.QuatX', 
+                                 'imu_data_foot.QuatY', 'imu_data_foot.QuatZ']].values)
+q_shank = quaternion(initial_pos[['imu_data_shank.QuatW', 'imu_data_shank.QuatX', 
+                                   'imu_data_shank.QuatY', 'imu_data_shank.QuatZ']].values)
 
-# ---- Traitement des quaternions ----
-# Convertir les quaternions en rotation pour le pied et le tibia
-q_foot = R.from_quat(np.column_stack((
-    initial_pos['imu_data_foot']['QuatW'],
-    initial_pos['imu_data_foot']['QuatX'],
-    initial_pos['imu_data_foot']['QuatY'],
-    initial_pos['imu_data_foot']['QuatZ']
-)))
+# Interpolation des quaternions du pied sur la même échelle temporelle que le tibia
+q_foot_interp = quaternion(interp1d(t_foot, q_foot, fill_value="extrapolate")(t_shank))
 
-q_shank = R.from_quat(np.column_stack((
-    initial_pos['imu_data_shank']['QuatW'],
-    initial_pos['imu_data_shank']['QuatX'],
-    initial_pos['imu_data_shank']['QuatY'],
-    initial_pos['imu_data_shank']['QuatZ']
-)))
+# Initialisation de l'angle de référence (initial_angle)
+ankle_angles = np.zeros(len(q_shank))
 
-# Interpolation des quaternions du pied avec les timestamps du tibia
-t_foot = initial_pos['imu_data_foot']['TimeStampGlob']
-t_shank = initial_pos['imu_data_shank']['TimeStampGlob']
+# Calcul des angles entre le pied et le tibia
+for i in range(len(q_shank)):
+    ankle_angles[i] = dist(q_foot_interp[i], q_shank[i]) - initial_angle
 
-interp_func = interp1d(t_foot, np.column_stack((
-    initial_pos['imu_data_foot']['QuatW'],
-    initial_pos['imu_data_foot']['QuatX'],
-    initial_pos['imu_data_foot']['QuatY'],
-    initial_pos['imu_data_foot']['QuatZ']
-)), axis=0)
+# Remplacement des valeurs NaN par 0
+ankle_angles[np.isnan(ankle_angles)] = 0
 
-q_foot_interp = R.from_quat(interp_func(t_shank))
+# Filtrage des angles avec un filtre de médiane mobile
+ankle_angles_filt = smoothdata(ankle_angles, method='movmedian', smoothing_factor=0.1)
 
-# ---- Calcul des angles de cheville ----
-ankle_angles = [q_foot_interp[i].inv() * q_shank[i] for i in range(len(q_shank))]
-ankle_angles_deg = np.array([angle.magnitude() for angle in ankle_angles])  # Conversion en degrés
-
-# ---- Filtrage des angles de cheville ----
-ankle_angles_deg = np.nan_to_num(ankle_angles_deg)  # Remplacer NaN par 0
-ankle_angles_filt = medfilt(ankle_angles_deg, kernel_size=5)  # Filtre médian
-
-# Compensation d'angle
-compensator = np.deg2rad(9)  # Compensateur de 9 degrés
-initial_angle = np.median(ankle_angles_filt[5:-5]) + compensator
-ankle_angles_filt -= initial_angle  # Appliquer la compensation
-
-# ---- Tracé des angles de cheville ----
-plt.figure()
-plt.plot(t_shank, ankle_angles_deg, label="Angles de cheville bruts")
-plt.plot(t_shank, ankle_angles_filt, label="Angles de cheville filtrés", linestyle='--')
-plt.xlabel("Temps (s)")
-plt.ylabel("Angle (degrés)")
-plt.title("Angles de cheville")
+# Affichage des résultats
+plt.figure(1)
+plt.subplot(2, 1, 1)
+plt.plot(ankle_angles, label='Angles de la cheville')
+plt.plot(ankle_angles_filt, label='Angles filtrés de la cheville')
 plt.legend()
-plt.grid(True)
+plt.subplot(2, 1, 2)
+plt.plot(healthy_data[0], healthy_data[1])
 plt.show()
 
-# ---- Analyse FFT sur les données de force (vGRF) ----
-Fs = 100  # Fréquence d'échantillonnage en Hz
-force_data = force_noise_calib['insole_data']['Data'][:, 0]  # Utilisation d'un capteur pour l'exemple
-N = len(force_data)
+# vGRF Analyzer to determine Cutoff Frequency
+cutoff_freq = 3
+Fs = 100
 
-# Transformation de Fourier
-Y = fft(force_data)
-f = np.linspace(0, Fs, N)
+# Low-Pass Filter Design
+b, a = butter(4, cutoff_freq / (0.5 * Fs), btype='low')
 
-# Amplitude du signal
-P2 = np.abs(Y / N)
-P1 = P2[:N // 2 + 1]
-P1[1:-1] *= 2
+# Appliquer le filtre aux données
+for i in range(force_noise_calib.shape[1]):
+    filtered_data = lfilter(b, a, force_noise_calib.iloc[:, i].astype(float))
+    force_noise_calib[f'DataFilt_{i}'] = filtered_data
 
-# Affichage du spectre de fréquence pour choisir la fréquence de coupure
-plt.figure()
-plt.plot(f[:N // 2 + 1], P1)
-plt.title('FFT des données de force')
-plt.xlabel('Fréquence (Hz)')
+# Visualisation des résultats filtrés
+plt.figure(2)
+plt.subplot(2, 2, 1)
+plt.plot(force_noise_calib.iloc[:, :])  # Original Signal Calibration
+plt.title('Signal Original Calibration')
+plt.xlabel('Time (s)')
 plt.ylabel('Amplitude')
-plt.grid(True)
-plt.show()
+plt.grid()
 
-# ---- Filtrage des données de force ----
-cutoff_freq = 5  # Exemple de fréquence de coupure à 5 Hz
-b, a = butter(N=4, Wn=cutoff_freq / (Fs / 2), btype='low', analog=False)
-filtered_force_data = filtfilt(b, a, force_data)
+plt.subplot(2, 2, 2)
+plt.plot(force_noise_calib.filter(like='DataFilt'))  # Filtered Signal Calibration
+plt.title('Signal Filtré Calibration')
+plt.xlabel('Time (s)')
+plt.ylabel('Amplitude')
+plt.grid()
 
-# ---- Détection des phases de marche ----
-threshold = np.mean(filtered_force_data)  # Seuil simple basé sur la moyenne
-gait_phases = filtered_force_data > threshold  # Détection des phases
+# vGRF Estimator
+heel = np.sum(force_noise_calib.iloc[:, 12:17], axis=1)
+heel[heel < 300] = 0
+mid = np.sum(force_noise_calib.iloc[:, 6:12], axis=1)
+mid[mid < 300] = 0
+tip = np.sum(force_noise_calib.iloc[:, :5], axis=1)
+tip[tip < 300] = 0
 
-# ---- Tracé des phases de marche ----
-plt.figure()
-plt.plot(filtered_force_data, label="Force filtrée")
-plt.plot(gait_phases * np.max(filtered_force_data), label="Phases de marche", linestyle='--')
-plt.legend()
-plt.title('Détection des phases de marche')
-plt.grid(True)
-plt.show()
+vGRF_data = np.maximum(heel, np.maximum(mid, tip))
+vGRF_normalized = (vGRF_data - np.min(vGRF_data)) / (np.max(vGRF_data) - np.min(vGRF_data))
 
-# ---- Sorties finales ----
-force_data_train = filtered_force_data
-gait_vector = gait_phases
-ankle_angles_filt = ankle_angles_filt
+plt.figure(3)
+plt.plot(vGRF_normalized)
+plt.title('Force de Réaction au Sol Vertical Normalisée (vGRF)')
+plt.xlabel('Time (s)')
+plt.ylabel('Force Normalisée')
+plt.grid()
+
+# Determine Gait Phases
+# Initialisation des variables
+gait_phases = []
+cycle_starts = []
+phase_change_indices = []
+phase_labels = []
+
+# Calibration
+known_force = 1
+total_force = np.zeros(len(heel))
+
+for i in range(len(heel)):
+    if (heel[i] > 333) or (mid[i] > 333) or (tip[i] > 333):
+        total_force[i] = heel[i] + mid[i] + tip[i]
+        true_heel_force = known_force * heel[i] / total_force[i]
+        true_mid_force = known_force * mid[i] / total_force[i]
+        true_toe_force = known_force * tip[i] / total_force[i]
+    else:
+        true_heel_force = 0
+        true_mid_force = 0
+        true_toe_force = 0
+
+    # Détection des phases de marche en fonction des conditions sur les forces
+    if true_heel_force > 0.2 and (true_mid_force < 0.1 or true_toe_force < 0.1):
+        phase = 'HS'
+        if len(cycle_starts) == 0 or (i - cycle_starts[-1]) > 100:
+            cycle_starts.append(i)
+    elif true_heel_force < 0.1 and true_mid_force < 0.1 and true_toe_force < 0.1:
+        phase = 'MSW'
+    elif true_heel_force < 0.4 and true_mid_force < 0.3 and true_toe_force < 0.5:
+        phase = 'TO'
+    elif true_mid_force > 0.3 and true_heel_force < 0.3 and true_toe_force > 0.25:
+        phase = 'HO'
+    elif true_heel_force > 0.25 and true_mid_force > 0.25:
+        phase = 'FF/MST'
+
+    gait_phases.append(phase)
+
+    # Détecter les changements de phase
+    if i == 0 or gait_phases[i] != gait_phases[i - 1]:
+        phase_change_indices.append(i)
+        phase_labels.append(phase)
+
+# Output des données de force et des phases de marche
+np.savez('output_data.npz', force_data=true_total_forces, gait_phases=gait_phases, 
+         phase_change_indices=phase_change_indices, phase_labels=phase_labels)
