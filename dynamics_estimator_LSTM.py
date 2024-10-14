@@ -10,6 +10,10 @@ from tensorflow.keras.layers import LSTM, Dense
 from sklearn.metrics import confusion_matrix
 import seaborn as sns
 import matplotlib.pyplot as plt
+import time
+
+# Démarrer le chronomètre
+start_time = time.time()
 
 # Start MATLAB engine
 eng = matlab.engine.start_matlab()
@@ -93,7 +97,7 @@ model.add(Dense(4, activation='softmax'))  # Assuming 4 phases of gait
 model.compile(loss='sparse_categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
 
 # Train the model
-model.fit(X_train, y_train, epochs=50, batch_size=32, validation_split=0.2)
+model.fit(X_train, y_train, epochs=15, batch_size=32, validation_split=0.2)
 
 # Predict on the test set
 y_pred = model.predict(X_test)
@@ -119,6 +123,11 @@ print(y_pred_values_count_percent)
 print("True values count:")
 print(y_test_values_count)
 print(y_test_values_count_percent)
+
+# Calcul du temps écoulé
+end_time = time.time()
+elapsed_time = end_time - start_time
+print(f"Temps d'exécution: {elapsed_time} secondes")
 
 # Confusion Matrix
 cm = confusion_matrix(y_test_phases, y_pred_phases)

@@ -114,7 +114,7 @@ model.add(Dense(4, activation='softmax'))  # Supposons qu'il y ait 4 phases de m
 model.compile(loss='sparse_categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
 
 # Entraînement du modèle
-model.fit(X_train_reshaped, y_train_encoded, epochs=20, batch_size=32, validation_split=0.2)
+model.fit(X_train_reshaped, y_train_encoded, epochs=15, batch_size=32, validation_split=0.2)
 
 # Prédiction sur les données de test
 y_pred = model.predict(X_test_reshaped)

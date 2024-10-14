@@ -1,4 +1,8 @@
 import matlab.engine
+import time
+
+# Démarrer le chronomètre
+start_time = time.time()
 
 # Start MATLAB engine
 eng = matlab.engine.start_matlab()
@@ -93,6 +97,11 @@ print(y_test_values_count_percent)
 from sklearn.metrics import confusion_matrix
 import seaborn as sns
 import matplotlib.pyplot as plt
+
+# Calcul du temps écoulé
+end_time = time.time()
+elapsed_time = end_time - start_time
+print(f"Temps d'exécution: {elapsed_time} secondes")
 
 # Supposons que y_test sont les vraies classes et y_pred sont les classes prédites
 cm = confusion_matrix(y_test, y_pred)
