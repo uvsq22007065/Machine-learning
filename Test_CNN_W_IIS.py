@@ -154,7 +154,7 @@ X_combined_reshaped_train = X_combined_reshaped_train[:min_length_train]
 y_seq_train = y_seq_train[:min_length_train]
 
 # Train the model
-model.fit(X_combined_reshaped_train, y_seq_train, epochs=15, batch_size=32)
+model.fit(X_combined_reshaped_train, y_seq_train, epochs=50, batch_size=32)
 
 # Predict on the test set
 y_pred = model.predict(X_combined_reshaped_test)
