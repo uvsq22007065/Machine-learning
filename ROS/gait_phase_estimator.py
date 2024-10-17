@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 import rospy, rospkg, rosbag
-from std_msgs.msg import Float64
+from std_msgs.msg import Float64, String
 import os
 import numpy as np
 
@@ -13,6 +13,9 @@ class GaitPhaseEstimator:
 
         self.ankle_angle_sub = rospy.Subscriber('/ankle_joint/angle', Float64, self.ankle_angle_callback)
         self.ground_force = rospy.Subscriber('/vGRF', Float64, self.ground_force_callback)
+
+        # Publisher
+        self.phase_pub = rospy.Publisher('/gait_phase_detection', String, queue_size=10)
 
         # Learning model path
         self.patient = rospy.get_param("patient","test")
@@ -68,56 +71,55 @@ class GaitPhaseEstimator:
         interpolated_forces = vgrf_data[:, 1]
 
         # Estimate gait phases from the vGRF
-            # Estimate gait phases from the vGRF
-    def estimate_gait_phases(self, interpolated_forces):
-        heel_force = interpolated_forces[:, 0:5].sum(axis=1)
-        mid_force = interpolated_forces[:, 5:11].sum(axis=1)
-        toe_force = interpolated_forces[:, 11:16].sum(axis=1)
+        def estimate_gait_phases(self, interpolated_forces):
+            heel_force = interpolated_forces[:, 0:5].sum(axis=1)
+            mid_force = interpolated_forces[:, 5:11].sum(axis=1)
+            toe_force = interpolated_forces[:, 11:16].sum(axis=1)
 
-        true_heel_force = np.zeros_like(heel_force)
-        true_mid_force = np.zeros_like(mid_force)
-        true_toe_force = np.zeros_like(toe_force)
-        total_force = heel_force + mid_force + toe_force
-        known_force = 1  # Known calibrated force
+            true_heel_force = np.zeros_like(heel_force)
+            true_mid_force = np.zeros_like(mid_force)
+            true_toe_force = np.zeros_like(toe_force)
+            total_force = heel_force + mid_force + toe_force
+            known_force = 1  # Known calibrated force
 
-        gait_phases = []
-        in_cycle_TO = False  # Indicates if we are in a cycle
-        in_cycle_FF = False
+            gait_phases = []
+            in_cycle_TO = False  # Indicates if we are in a cycle
+            in_cycle_FF = False
 
-        # Iterate through the forces to estimate the gait phases
-        for i in range(len(heel_force)):
-            if total_force[i] > 333:  # Apply force threshold
-                true_heel_force[i] = known_force * heel_force[i] / total_force[i]
-                true_mid_force[i] = known_force * mid_force[i] / total_force[i]
-                true_toe_force[i] = known_force * toe_force[i] / total_force[i]
+            # Iterate through the forces to estimate the gait phases
+            for i in range(len(heel_force)):
+                if total_force[i] > 333:  # Apply force threshold
+                    true_heel_force[i] = known_force * heel_force[i] / total_force[i]
+                    true_mid_force[i] = known_force * mid_force[i] / total_force[i]
+                    true_toe_force[i] = known_force * toe_force[i] / total_force[i]
 
-                if true_heel_force[i] > 0.2 and (true_mid_force[i] < 0.1 or true_toe_force[i] < 0.1):
-                    phase = 'HS'  # Heel Strike
-                    if not in_cycle_TO and not in_cycle_FF:
-                        in_cycle_TO = True
-                        in_cycle_FF = True
+                    if true_heel_force[i] > 0.2 and (true_mid_force[i] < 0.1 or true_toe_force[i] < 0.1):
+                        phase = 'HS'  # Heel Strike
+                        if not in_cycle_TO and not in_cycle_FF:
+                            in_cycle_TO = True
+                            in_cycle_FF = True
 
-                elif true_heel_force[i] < 0.1 and true_mid_force[i] < 0.1 and true_toe_force[i] < 0.1:
-                    phase = 'MSW'  # Mid-Swing
+                    elif true_heel_force[i] < 0.1 and true_mid_force[i] < 0.1 and true_toe_force[i] < 0.1:
+                        phase = 'MSW'  # Mid-Swing
 
-                elif true_heel_force[i] < 0.4 and true_mid_force[i] < 0.3 and true_toe_force[i] < 0.5:
-                    if in_cycle_TO:
-                        phase = 'TO'  # Toe-Off
-                        in_cycle_TO = False
+                    elif true_heel_force[i] < 0.4 and true_mid_force[i] < 0.3 and true_toe_force[i] < 0.5:
+                        if in_cycle_TO:
+                            phase = 'TO'  # Toe-Off
+                            in_cycle_TO = False
 
-                elif true_mid_force[i] > 0.3 and true_heel_force[i] < 0.3 and true_toe_force[i] > 0.25:
-                    phase = 'HO'  # Heel-Off
+                    elif true_mid_force[i] > 0.3 and true_heel_force[i] < 0.3 and true_toe_force[i] > 0.25:
+                        phase = 'HO'  # Heel-Off
 
-                elif true_heel_force[i] > 0.25 and true_mid_force[i] > 0.25:
-                    if in_cycle_FF:
-                        phase = 'FF/MST'  # Flat Foot/Mid-Stance
-                        in_cycle_FF = False
-            else:
-                phase = 'None'
+                    elif true_heel_force[i] > 0.25 and true_mid_force[i] > 0.25:
+                        if in_cycle_FF:
+                            phase = 'FF/MST'  # Flat Foot/Mid-Stance
+                            in_cycle_FF = False
+                else:
+                    phase = 'None'
 
-            gait_phases.append(phase)
+                gait_phases.append(phase)
 
-        return gait_phases
+            return gait_phases
 
 
         # Training code goes here
@@ -135,6 +137,12 @@ class GaitPhaseEstimator:
         if ((self.modelLoaded == True) and (self.ankle_angle != None) and (self.ground_force != None)):
             rospy.loginfo(f"Estimating phase for patient {self.patient} using model {self.model_path}...")
             # Estimation code goes here
+            gait_phases = self.estimate_gait_phases(self.ground_force)
+            for i, phase in enumerate(gait_phases):
+                rospy.loginfo(f"Time Step {i}: Gait Phase - {phase}")
+                self.phase_pub.publish(phase)
+            else:
+                rospy.logwarn("Missing data")
 
 
 
