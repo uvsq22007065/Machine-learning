@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 import rospy, rospkg, rosbag
-from std_msgs.msg import Float64, String
+from std_msgs.msg import Float64
 import os
 import numpy as np
 
@@ -13,9 +13,6 @@ class GaitPhaseEstimator:
 
         self.ankle_angle_sub = rospy.Subscriber('/ankle_joint/angle', Float64, self.ankle_angle_callback)
         self.ground_force = rospy.Subscriber('/vGRF', Float64, self.ground_force_callback)
-
-        # Publisher
-        self.phase_pub = rospy.Publisher('/gait_phase_detection', String, queue_size=10)
 
         # Learning model path
         self.patient = rospy.get_param("patient","test")
@@ -69,58 +66,7 @@ class GaitPhaseEstimator:
         # Interpolate angle data to match vGRF timestamps (angle data have lower frequency than vGRF)
         interpolated_angles = np.interp(vgrf_data[:, 0], angle_data[:, 0], angle_data[:, 1])
         interpolated_forces = vgrf_data[:, 1]
-
-        # Estimate gait phases from the vGRF
-        def estimate_gait_phases(self, interpolated_forces):
-            heel_force = interpolated_forces[:, 0:5].sum(axis=1)
-            mid_force = interpolated_forces[:, 5:11].sum(axis=1)
-            toe_force = interpolated_forces[:, 11:16].sum(axis=1)
-
-            true_heel_force = np.zeros_like(heel_force)
-            true_mid_force = np.zeros_like(mid_force)
-            true_toe_force = np.zeros_like(toe_force)
-            total_force = heel_force + mid_force + toe_force
-            known_force = 1  # Known calibrated force
-
-            gait_phases = []
-            in_cycle_TO = False  # Indicates if we are in a cycle
-            in_cycle_FF = False
-
-            # Iterate through the forces to estimate the gait phases
-            for i in range(len(heel_force)):
-                if total_force[i] > 333:  # Apply force threshold
-                    true_heel_force[i] = known_force * heel_force[i] / total_force[i]
-                    true_mid_force[i] = known_force * mid_force[i] / total_force[i]
-                    true_toe_force[i] = known_force * toe_force[i] / total_force[i]
-
-                    if true_heel_force[i] > 0.2 and (true_mid_force[i] < 0.1 or true_toe_force[i] < 0.1):
-                        phase = 'HS'  # Heel Strike
-                        if not in_cycle_TO and not in_cycle_FF:
-                            in_cycle_TO = True
-                            in_cycle_FF = True
-
-                    elif true_heel_force[i] < 0.1 and true_mid_force[i] < 0.1 and true_toe_force[i] < 0.1:
-                        phase = 'MSW'  # Mid-Swing
-
-                    elif true_heel_force[i] < 0.4 and true_mid_force[i] < 0.3 and true_toe_force[i] < 0.5:
-                        if in_cycle_TO:
-                            phase = 'TO'  # Toe-Off
-                            in_cycle_TO = False
-
-                    elif true_mid_force[i] > 0.3 and true_heel_force[i] < 0.3 and true_toe_force[i] > 0.25:
-                        phase = 'HO'  # Heel-Off
-
-                    elif true_heel_force[i] > 0.25 and true_mid_force[i] > 0.25:
-                        if in_cycle_FF:
-                            phase = 'FF/MST'  # Flat Foot/Mid-Stance
-                            in_cycle_FF = False
-                else:
-                    phase = 'None'
-
-                gait_phases.append(phase)
-
-            return gait_phases
-
+        
 
         # Training code goes here
 
@@ -137,18 +83,38 @@ class GaitPhaseEstimator:
         if ((self.modelLoaded == True) and (self.ankle_angle != None) and (self.ground_force != None)):
             rospy.loginfo(f"Estimating phase for patient {self.patient} using model {self.model_path}...")
             # Estimation code goes here
-            gait_phases = self.estimate_gait_phases(self.ground_force)
-            for i, phase in enumerate(gait_phases):
-                rospy.loginfo(f"Time Step {i}: Gait Phase - {phase}")
-                self.phase_pub.publish(phase)
+            
+
+            # Déterminer la phase actuelle en fonction du vGRF
+            if self.ground_force <= 0:
+                self.gait_phase = "Swing Phase"
             else:
-                rospy.logwarn("Missing data")
+                self.gait_phase = "Stance Phase"
+
+            # Mise à jour du pourcentage d'accomplissement du cycle de marche
+            if self.gait_phase != previous_phase:
+                if self.gait_phase == "Stance Phase":
+                    self.gait_progress = 0  # Début du cycle (stance phase)
+                elif self.gait_phase == "Swing Phase":
+                    self.gait_progress = 100  # Fin du cycle (swing phase)
+            
+            # Affichage du progrès par pas de 10 %
+            if self.gait_progress in range(0, 101, 10):
+                rospy.loginfo(f"Gait Progress: {self.gait_progress}%")
+
+            # Incrément du progrès dans la phase actuelle
+            if self.gait_phase == "Stance Phase" and self.gait_progress < 50:
+                self.gait_progress += 10
+            elif self.gait_phase == "Swing Phase" and self.gait_progress < 100:
+                self.gait_progress += 10
+
+            rospy.loginfo(f"Current Phase: {self.gait_phase}, Progress: {self.gait_progress}%")
+
+            # Réinitialisation des variables après estimation
+        self.ankle_angle = None
+        self.ground_force = None
 
 
-
-            #Final Estimation code
-            ankle_angle = None
-            ground_force = None
 
     def run(self):
         # Check if the model exists
