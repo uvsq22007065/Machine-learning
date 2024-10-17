@@ -88,11 +88,13 @@ class GaitPhaseEstimator:
             # Déterminer la phase actuelle en fonction du vGRF
             if self.ground_force <= 0:
                 self.gait_phase = "Swing Phase"
+                previous_phase = False
             else:
                 self.gait_phase = "Stance Phase"
+                previous_phase = True
 
             # Mise à jour du pourcentage d'accomplissement du cycle de marche
-            if self.gait_phase != previous_phase:
+            if previous_phase:
                 if self.gait_phase == "Stance Phase":
                     self.gait_progress = 0  # Début du cycle (stance phase)
                 elif self.gait_phase == "Swing Phase":
