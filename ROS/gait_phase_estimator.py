@@ -4,132 +4,146 @@ import rospy, rospkg, rosbag
 from std_msgs.msg import Float64
 import os
 import numpy as np
+import csv
 
 class GaitPhaseEstimator:
     def __init__(self):
-
-        # ROS variables
+        # ROS setup
         rospy.init_node('gait_phase_estimator', anonymous=True)
 
         self.ankle_angle_sub = rospy.Subscriber('/ankle_joint/angle', Float64, self.ankle_angle_callback)
-        self.ground_force = rospy.Subscriber('/vGRF', Float64, self.ground_force_callback)
+        self.ground_force_sub = rospy.Subscriber('/vGRF', Float64, self.ground_force_callback)
 
-        # Learning model path
-        self.patient = rospy.get_param("patient","test")
+        # Paths to models and training data
+        self.patient = rospy.get_param("patient", "test")
         rospack = rospkg.RosPack()
-        package_path = rospack.get_path('ankle_exoskeleton') 
+        package_path = rospack.get_path('ankle_exoskeleton')
+
         self.model_path = os.path.join(package_path, "log", "learning_models", f"{self.patient}_model.csv")
         self.bag_path = os.path.join(package_path, "log", "training_bags", f"{self.patient}.bag")
 
+        # Variables to track state
         self.modelLoaded = False
-
-        self.ankle_angle = []
-        self.ground_force = []
+        self.ankle_angle = None
+        self.ground_force = None
         self.learning_model = []
 
     def ankle_angle_callback(self, msg):
         self.ankle_angle = msg.data
-        self.estimate_phase()
 
     def ground_force_callback(self, msg):
         self.ground_force = msg.data
-        self.estimate_phase()
 
     def train_model(self):
         rospy.loginfo(f"Training model for patient {self.patient}...")
-        
+
         # Check if the bag file exists
         if not os.path.exists(self.bag_path):
             rospy.logerr(f"No .bag file found for patient {self.patient} in {self.bag_path}. Training cannot proceed.")
             rospy.signal_shutdown("Missing .bag file for training.")
             return
 
-        # Create the dataset for training
-        # Read bag file
+        # Read bag file and extract data
         bag = rosbag.Bag(self.bag_path)
         angle_data = []
         vgrf_data = []
 
-        # Extract data from the /ankle_joint/angle and /vGRF topics with timestamps
         for topic, msg, t in bag.read_messages(topics=['/ankle_joint/angle', '/vGRF']):
             if topic == '/ankle_joint/angle':
                 angle_data.append((t.to_sec(), msg.data))
             elif topic == '/vGRF':
                 vgrf_data.append((t.to_sec(), msg.data))
-        
+
         bag.close()
 
-        # Convert to numpy arrays for interpolation
+        # Convert to numpy arrays
         angle_data = np.array(angle_data)
         vgrf_data = np.array(vgrf_data)
 
-        # Interpolate angle data to match vGRF timestamps (angle data have lower frequency than vGRF)
+        # Interpolate angle data to match vGRF timestamps
         interpolated_angles = np.interp(vgrf_data[:, 0], angle_data[:, 0], angle_data[:, 1])
         interpolated_forces = vgrf_data[:, 1]
+
+        # Initialize arrays to store derivatives and phases
+        force_derivatives = np.gradient(interpolated_forces)
+        angle_derivatives = np.gradient(interpolated_angles)
+        gait_phases = []
+        gait_progress = []
+
+        stance_start_time = None
+        swing_end_time = None
+
+        # --- Estimate gait phases from the vGRF and compute gait progress ---
+        for i, force in enumerate(interpolated_forces):
+            current_time = vgrf_data[i, 0]
+            if force <= 0:  # Swing Phase
+                phase = "Swing Phase"
+                if stance_start_time is not None and swing_end_time is None:
+                    swing_end_time = current_time  # Mark the end of swing phase
+            else:  # Stance Phase
+                phase = "Stance Phase"
+                if stance_start_time is None:
+                    stance_start_time = current_time  # Mark the beginning of stance phase
+
+            gait_phases.append(phase)
+
+            # Calculate gait progress (0 to 100%) if both phase boundaries are defined
+            if stance_start_time and swing_end_time:
+                phase_duration = swing_end_time - stance_start_time
+                time_in_phase = current_time - stance_start_time
+                progress = (time_in_phase / phase_duration) * 100
+            else:
+                progress = 0
+
+            gait_progress.append(progress)
+
+        # --- Write data to CSV ---
+        rospy.loginfo(f"Saving gait data to {self.model_path}...")
+        with open(self.model_path, 'w', newline='') as csvfile:
+            writer = csv.writer(csvfile)
+            writer.writerow(['Time', 'Force', 'Force_Derivative', 'Angle', 'Angle_Derivative', 'Gait_Progress', 'Phase'])
+
+            for i in range(len(vgrf_data)):
+                writer.writerow([
+                    vgrf_data[i, 0],  # Time
+                    interpolated_forces[i],  # Force
+                    force_derivatives[i],  # Force derivative
+                    interpolated_angles[i],  # Angle
+                    angle_derivatives[i],  # Angle derivative
+                    gait_progress[i],  # Gait progress
+                    gait_phases[i]  # Phase
+                ])
+
+        rospy.loginfo(f"Gait data saved successfully.")
+
+        # Training code here
         
-
-        # Training code goes here
-
-
-
-        # Final of Traning code
-        # Load the learning model 
+        
+        # Final of Training code
+        # Load the learning model
         with open(self.model_path, 'r') as model_file:
             for line in model_file:
                 self.learning_model.append(line.strip().split(','))  # Assuming CSV with commas
         self.modelLoaded = True
-        
+
     def estimate_phase(self):
-        if ((self.modelLoaded == True) and (self.ankle_angle != None) and (self.ground_force != None)):
+        if self.modelLoaded and self.ankle_angle is not None and self.ground_force is not None:
             rospy.loginfo(f"Estimating phase for patient {self.patient} using model {self.model_path}...")
             # Estimation code goes here
-            
 
-            # Déterminer la phase actuelle en fonction du vGRF
-            if self.ground_force <= 0:
-                self.gait_phase = "Swing Phase"
-                previous_phase = False
-            else:
-                self.gait_phase = "Stance Phase"
-                previous_phase = True
-
-            # Mise à jour du pourcentage d'accomplissement du cycle de marche
-            if previous_phase:
-                if self.gait_phase == "Stance Phase":
-                    self.gait_progress = 0  # Début du cycle (stance phase)
-                elif self.gait_phase == "Swing Phase":
-                    self.gait_progress = 100  # Fin du cycle (swing phase)
-            
-            # Affichage du progrès par pas de 10 %
-            if self.gait_progress in range(0, 101, 10):
-                rospy.loginfo(f"Gait Progress: {self.gait_progress}%")
-
-            # Incrément du progrès dans la phase actuelle
-            if self.gait_phase == "Stance Phase" and self.gait_progress < 50:
-                self.gait_progress += 10
-            elif self.gait_phase == "Swing Phase" and self.gait_progress < 100:
-                self.gait_progress += 10
-
-            rospy.loginfo(f"Current Phase: {self.gait_phase}, Progress: {self.gait_progress}%")
-
-            # Réinitialisation des variables après estimation
-        self.ankle_angle = None
-        self.ground_force = None
-
-
+            # Final Estimation code
+            self.ankle_angle = None
+            self.ground_force = None
 
     def run(self):
-        # Check if the model exists
         if os.path.exists(self.model_path):
             rospy.loginfo(f"Model found for patient {self.patient}. Proceeding with phase estimation.")
-            # Load the learning model 
             with open(self.model_path, 'r') as model_file:
                 for line in model_file:
-                    self.learning_model.append(line.strip().split(','))  # Assuming CSV with commas
+                    self.learning_model.append(line.strip().split(','))
             self.modelLoaded = True
         else:
             rospy.logwarn(f"Model not found for patient {self.patient}. Training a new model.")
-            self.modelLoaded = False
             self.train_model()
 
         rospy.spin()
