@@ -27,6 +27,7 @@ class GaitPhaseEstimator:
         self.ankle_angle = None
         self.ground_force = None
         self.learning_model = []
+        self.in_stance_phase = False  # Suivi de la phase actuelle (True = stance, False = swing)
 
     def ankle_angle_callback(self, msg):
         self.ankle_angle = msg.data
@@ -72,29 +73,41 @@ class GaitPhaseEstimator:
 
         stance_start_time = None
         swing_end_time = None
-
-        # --- Estimate gait phases from the vGRF and compute gait progress ---
+        
+        # --- Calcul de la phase et de la progression dans train_model ---
         for i, force in enumerate(interpolated_forces):
             current_time = vgrf_data[i, 0]
+
             if force <= 0:  # Swing Phase
                 phase = "Swing Phase"
-                if stance_start_time is not None and swing_end_time is None:
-                    swing_end_time = current_time  # Mark the end of swing phase
+                if self.in_stance_phase:
+                    # On passe de Stance à Swing : marquer la fin de Stance
+                    swing_end_time = current_time
+                    self.in_stance_phase = False  # Basculer en Swing
+
             else:  # Stance Phase
                 phase = "Stance Phase"
-                if stance_start_time is None:
-                    stance_start_time = current_time  # Mark the beginning of stance phase
+                if not self.in_stance_phase:
+                    # On passe de Swing à Stance : marquer le début de Stance
+                    stance_start_time = current_time
+                    swing_end_time = None  # Réinitialiser la fin de Swing
+                    self.in_stance_phase = True  # Basculer en Stance
 
-            gait_phases.append(phase)
-
-            # Calculate gait progress (0 to 100%) if both phase boundaries are defined
-            if stance_start_time and swing_end_time:
+            # Calcul de la progression de la marche (0 à 100 %)
+            if stance_start_time is not None and swing_end_time is not None:
+                # Phase complète détectée, calculer la progression
                 phase_duration = swing_end_time - stance_start_time
                 time_in_phase = current_time - stance_start_time
-                progress = (time_in_phase / phase_duration) * 100
+
+                if phase_duration > 0:  # Eviter la division par zéro
+                    progress = min((time_in_phase / phase_duration) * 100, 100)
+                else:
+                    progress = 0
             else:
+                # Si on n'a pas encore les deux limites de phase
                 progress = 0
 
+            gait_phases.append(phase)
             gait_progress.append(progress)
 
         # --- Write data to CSV ---
