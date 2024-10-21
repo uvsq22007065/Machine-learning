@@ -78,14 +78,15 @@ class GaitPhaseEstimator:
         
         # --- Calcul de la phase et de la progression dans train_model ---
         for i, force in enumerate(interpolated_forces):
-            current_time = vgrf_data[i, 0]
+            time_before_training = vgrf_data[1,0]
+            current_time = vgrf_data[i, 0] - time_before_training
 
             # Détection de la phase actuelle
             if force > 0:  # Stance Phase (prioritaire)
                 phase = "Stance Phase"
                 if not self.in_stance_phase:  # Transition Swing -> Stance
                     self.in_stance_phase = True
-                    self.phase_start_time = current_time  # Début de la phase Stance
+                    self.phase_start_time = current_time # Début de la phase Stance
 
             else:  # Swing Phase (tout le reste)
                 phase = "Swing Phase"
@@ -98,7 +99,7 @@ class GaitPhaseEstimator:
                 time_in_phase = current_time - self.phase_start_time
 
                 # Durée estimée d'une phase complète (ajustable si nécessaire)
-                estimated_phase_duration = 1.0  # Durée approximative en secondes
+                estimated_phase_duration = 14.3/10  # Durée approximative en secondes
 
                 # Calcul de la progression linéaire (0 à 100 %)
                 progress = min((time_in_phase / estimated_phase_duration) * 100, 100)
