@@ -23,12 +23,6 @@ for i = 1:10:length(force)
         'VerticalAlignment', 'bottom', 'HorizontalAlignment', 'right');
 end
 
-% Ajouter des phases (exemple avec des moments adaptés)
-for i = 1:10:length(force)-10
-    text(time(i+5), force(i+5), sprintf('%.2f%%', phase(i)), ...
-        'VerticalAlignment', 'bottom', 'HorizontalAlignment', 'right');
-end
-
 
 % Ajouter des légendes et des labels
 xlabel('Temps (s)');
