@@ -72,6 +72,8 @@ class GaitPhaseEstimator:
         angle_derivatives = np.gradient(interpolated_angles)
         gait_phases = []
         gait_progress = []
+        current_time = []
+        current_time = [0] * len(vgrf_data)
 
         stance_start_time = None
         swing_end_time = None
@@ -79,32 +81,31 @@ class GaitPhaseEstimator:
         # --- Calcul de la phase et de la progression dans train_model ---
         for i, force in enumerate(interpolated_forces):
             time_before_training = vgrf_data[1,0]
-            current_time = vgrf_data[i, 0] - time_before_training
+            current_time[i] = vgrf_data[i, 0] - time_before_training
 
             # Détection de la phase actuelle
             if force > 0:  # Stance Phase (prioritaire)
                 phase = "Stance Phase"
                 if not self.in_stance_phase:  # Transition Swing -> Stance
+                    if self.in_stance_phase == False:
+                        progress = 0
                     self.in_stance_phase = True
-                    self.phase_start_time = current_time # Début de la phase Stance
+                    self.phase_start_time = current_time[i] # Début de la phase Stance
 
             else:  # Swing Phase (tout le reste)
                 phase = "Swing Phase"
                 if self.in_stance_phase:  # Transition Stance -> Swing
                     self.in_stance_phase = False
-                    self.phase_start_time = current_time  # Début de la phase Swing
 
             # Calcul de la progression linéaire au sein de la phase actuelle
             if self.phase_start_time is not None:
-                time_in_phase = current_time - self.phase_start_time
+                time_in_phase = current_time[i] - self.phase_start_time
 
                 # Durée estimée d'une phase complète (ajustable si nécessaire)
                 estimated_phase_duration = 14.3/10  # Durée approximative en secondes
 
                 # Calcul de la progression linéaire (0 à 100 %)
                 progress = min((time_in_phase / estimated_phase_duration) * 100, 100)
-            else:
-                progress = 0
 
             gait_phases.append(phase)
             gait_progress.append(progress)
@@ -117,7 +118,7 @@ class GaitPhaseEstimator:
 
             for i in range(len(vgrf_data)):
                 writer.writerow([
-                    vgrf_data[i, 0],  # Time
+                    current_time[i],  # Time
                     interpolated_forces[i],  # Force
                     force_derivatives[i],  # Force derivative
                     interpolated_angles[i],  # Angle
