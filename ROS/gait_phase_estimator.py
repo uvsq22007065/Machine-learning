@@ -30,6 +30,13 @@ class GaitPhaseEstimator:
         # Variables à initialiser dans le __init__ :
         self.in_stance_phase = False  # Suivi de la phase actuelle
         self.phase_start_time = None   # Heure de début de la phase actuelle
+        
+        # Initialisation des durées de phase
+        self.estimated_stance_duration = None  # Durée estimée de la phase Stance
+        self.estimated_swing_duration = None   # Durée estimée de la phase Swing
+        self.previous_phase = None             # Suivi de la phase précédente
+        self.previous_phase_time = None        # Temps de la transition entre les phases
+        self.estimated_phase_duration = None   # Durée totale estimée d'une phase complète (Stance + Swing)
 
     def ankle_angle_callback(self, msg):
         self.ankle_angle = msg.data
@@ -78,37 +85,68 @@ class GaitPhaseEstimator:
         stance_start_time = None
         swing_end_time = None
         
-        # --- Calcul de la phase et de la progression dans train_model ---
+        # Variables pour suivre la durée des phases
+        total_stance_time = 0
+        total_swing_time = 0
+        stance_count = 0
+        swing_count = 0
+
         for i, force in enumerate(interpolated_forces):
             time_before_training = vgrf_data[1,0]
             current_time[i] = vgrf_data[i, 0] - time_before_training
 
-            # Détection de la phase actuelle
-            if force > 0:  # Stance Phase (prioritaire)
+            if force > 0:  # Stance Phase
                 phase = "Stance Phase"
-                if not self.in_stance_phase:  # Transition Swing -> Stance
-                    if self.in_stance_phase == False:
-                        progress = 0
+                if not self.in_stance_phase:
+                    # Calcul de la durée de la phase Swing précédente
+                    if self.previous_phase == "Swing Phase":
+                        swing_duration = current_time[i] - self.previous_phase_time
+                        total_swing_time += swing_duration
+                        swing_count += 1
+
                     self.in_stance_phase = True
-                    self.phase_start_time = current_time[i] # Début de la phase Stance
+                    self.phase_start_time = current_time[i]
+                    self.previous_phase = "Stance Phase"
+                    self.previous_phase_time = current_time[i]
 
-            else:  # Swing Phase (tout le reste)
+            else:  # Swing Phase
                 phase = "Swing Phase"
-                if self.in_stance_phase:  # Transition Stance -> Swing
-                    self.in_stance_phase = False
+                if self.in_stance_phase:
+                    # Calcul de la durée de la phase Stance précédente
+                    stance_duration = current_time[i] - self.phase_start_time
+                    total_stance_time += stance_duration
+                    stance_count += 1
 
-            # Calcul de la progression linéaire au sein de la phase actuelle
+                    self.in_stance_phase = False
+                    self.previous_phase = "Swing Phase"
+                    self.previous_phase_time = current_time[i]
+
+            # Calcul de la progression dans la phase actuelle
             if self.phase_start_time is not None:
                 time_in_phase = current_time[i] - self.phase_start_time
 
-                # Durée estimée d'une phase complète (ajustable si nécessaire)
-                estimated_phase_duration = 14.3/10  # Durée approximative en secondes
+                # Utiliser la durée estimée (stance + swing) pour calculer la progression
+                if self.estimated_phase_duration:
+                    estimated_phase_duration = self.estimated_phase_duration
+                else:
+                    # Si aucune estimation n'est disponible, utiliser une valeur par défaut
+                    estimated_phase_duration = 14.3 / 10  # Valeur par défaut
 
-                # Calcul de la progression linéaire (0 à 100 %)
+                # Calcul de la progression (0 à 100 %)
                 progress = min((time_in_phase / estimated_phase_duration) * 100, 100)
 
             gait_phases.append(phase)
             gait_progress.append(progress)
+
+        # Calcul des durées moyennes de stance et swing à partir des données
+        if stance_count > 0:
+            self.estimated_stance_duration = total_stance_time / stance_count
+        if swing_count > 0:
+            self.estimated_swing_duration = total_swing_time / swing_count
+
+        # Calcul de la durée totale estimée d'une phase complète (Stance + Swing)
+        if self.estimated_stance_duration and self.estimated_swing_duration:
+            self.estimated_phase_duration = self.estimated_stance_duration + self.estimated_swing_duration
 
         # --- Write data to CSV ---
         rospy.loginfo(f"Saving gait data to {self.model_path}...")
