@@ -5,7 +5,6 @@ data = readtable('test_model.csv');
 time = data.Time;               % Temps
 force = data.Force;             % Force
 gait_progress = data.Gait_Progress; % Progression de la démarche
-phase = data.Phase;
 
 % Ajuster le temps pour commencer à 0 secondes
 time = time - time(1);
