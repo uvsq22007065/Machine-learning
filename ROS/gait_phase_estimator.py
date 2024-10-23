@@ -121,19 +121,24 @@ class GaitPhaseEstimator:
                     self.previous_phase = "Swing Phase"
                     self.previous_phase_time = current_time[i]
 
-            # Calcul de la progression dans la phase actuelle
+            # --- Calcul du progrès au sein de la phase actuelle ---
             if self.phase_start_time is not None:
                 time_in_phase = current_time[i] - self.phase_start_time
 
-                # Utiliser la durée estimée (stance + swing) pour calculer la progression
-                if self.estimated_phase_duration:
-                    estimated_phase_duration = self.estimated_phase_duration
-                else:
-                    # Si aucune estimation n'est disponible, utiliser une valeur par défaut
-                    estimated_phase_duration = 14.3 / 10  # Valeur par défaut
+                # Utiliser les durées estimées pour chaque phase
+                if self.in_stance_phase and self.estimated_stance_duration:
+                    estimated_phase_duration = self.estimated_stance_duration
+                    # Progression de 0 à 60 % pour la Stance Phase
+                    progress = min((time_in_phase / estimated_phase_duration) * 60, 60)
 
-                # Calcul de la progression (0 à 100 %)
-                progress = min((time_in_phase / estimated_phase_duration) * 100, 100)
+                elif not self.in_stance_phase and self.estimated_swing_duration:
+                    estimated_phase_duration = self.estimated_swing_duration
+                    # Progression de 60 à 100 % pour la Swing Phase
+                    progress = 60 + min((time_in_phase / estimated_phase_duration) * 40, 40)
+
+                else:
+                    # Valeur par défaut si les durées estimées ne sont pas encore disponibles
+                    progress = 0 if self.in_stance_phase else 60
 
             gait_phases.append(phase)
             gait_progress.append(progress)
