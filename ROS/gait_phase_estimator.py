@@ -31,7 +31,7 @@ class GaitPhaseEstimator:
         self.in_stance_phase = False  # Suivi de la phase actuelle
         self.phase_start_time = 0   # Heure de début de la phase actuelle
         self.stance_start_time = 0
-        self.swing_start_time = None
+        self.swing_start_time = 0
         
         # Initialisation des durées de phase
         self.estimated_stance_duration = 0.6 * 14.3 / 10  # Durée estimée de la phase Stance
@@ -82,12 +82,13 @@ class GaitPhaseEstimator:
         self.gait_phases = []
         self.gait_progress = []
         self.current_time = []
-        self.time_in_phase = []
+        self.stance_time_in_phase = []
+        self.swing_time_in_phase = []
         self.estimated_stance_duration = 0.6 * 14.3 / 10
         self.estimated_swing_duration = 0.4 * 14.3 / 10
 
-        self.stance_start_time = None
-        self.swing_end_time = None
+        self.stance_start_time = 0
+        self.swing_end_time = 0
         
         # Variables pour suivre la durée des phases
         self.total_stance_time = 0
@@ -95,56 +96,69 @@ class GaitPhaseEstimator:
         self.stance_count = 0
         self.swing_count = 0
         stance_duration = 0.6815521717071533
-        time_before_training = vgrf_data[1,0]
+        time_before_training = vgrf_data[0,0]
 
         for i, force in enumerate(interpolated_forces):
             current_time_value = vgrf_data[i, 0] - time_before_training
             self.current_time.append(current_time_value)
 
-            if force > 0:  # Stance Phase
+            # Stance Phase
+            if force > 0:
                 phase = "Stance Phase"
                 if self.previous_phase == "Swing Phase":
+                    # Reset and update stance tracking on phase transition
                     progress = 0
                     self.in_stance_phase = True
                     self.previous_phase = "Stance Phase"
+                    swing_time_in_phase_value = 0
+                    self.swing_time_in_phase.append(swing_time_in_phase_value)
                     if self.stance_count > 0:
                         stance_duration = self.current_time[i] - self.stance_start_time
                         self.total_stance_time += stance_duration
                         self.estimated_stance_duration = self.total_stance_time / self.stance_count
                     self.stance_start_time = self.current_time[i]
-                    time_in_phase_value = 0
+                    stance_time_in_phase_value = self.current_time[i] - self.stance_start_time
+                    self.stance_time_in_phase.append(stance_time_in_phase_value)
                     self.stance_count += 1
+                    self.gait_progress.append(0)
                 else:
-                    time_in_phase_value = self.current_time[i] - self.stance_start_time
-                    progress = min((time_in_phase_value / self.estimated_stance_duration) * 60, 60)
+                    swing_time_in_phase_value = 0
+                    self.swing_time_in_phase.append(swing_time_in_phase_value)
+                    stance_time_in_phase_value = self.current_time[i] - self.stance_start_time
+                    self.stance_time_in_phase.append(stance_time_in_phase_value)
+                    # Updated progress calculation
+                    progress = (60 * (self.stance_time_in_phase[i] / self.estimated_stance_duration))
 
-                self.time_in_phase.append(time_in_phase_value)
-                self.gait_progress.append(progress)
-
-            else:  # Swing Phase
+            # Swing Phase
+            else:
                 phase = "Swing Phase"
                 if self.previous_phase == "Stance Phase":
+                    # Reset and update swing tracking on phase transition
                     progress = 60
                     self.in_stance_phase = False
                     self.previous_phase = "Swing Phase"
+                    stance_time_in_phase_value = 0
+                    self.stance_time_in_phase.append(stance_time_in_phase_value)
                     if self.swing_count > 0:
                         swing_duration = self.current_time[i] - self.swing_start_time
                         self.total_swing_time += swing_duration
                         self.estimated_swing_duration = self.total_swing_time / self.swing_count
                     self.swing_start_time = self.current_time[i]
-                    time_in_phase_value = 0
+                    swing_time_in_phase_value = self.current_time[i] - self.swing_start_time
+                    self.swing_time_in_phase.append(swing_time_in_phase_value)
                     self.swing_count += 1
+                    self.gait_progress.append(60)
                 else:
-                    time_in_phase_value = self.current_time[i] - self.swing_start_time
-                    progress = 60 + min((time_in_phase_value / self.estimated_swing_duration) * 40, 40)
+                    stance_time_in_phase_value = 0
+                    self.stance_time_in_phase.append(stance_time_in_phase_value)
+                    swing_time_in_phase_value = self.current_time[i] - self.swing_start_time
+                    self.swing_time_in_phase.append(swing_time_in_phase_value)
+                    # Updated progress calculation
+                    progress = 60 + (40 * (self.swing_time_in_phase[i] / self.estimated_swing_duration))
 
-                # Correct progress if it's stuck at 100
-                progress = min(progress, 100)
-
-                self.time_in_phase.append(time_in_phase_value)
-                self.gait_progress.append(progress)
-
+            # Append values
             self.gait_phases.append(phase)
+            self.gait_progress.append(min(progress, 100))  # Ensure progress does not exceed 100
 
         # --- Write data to CSV ---
         rospy.loginfo(f"Saving gait data to {self.model_path}...")
@@ -154,13 +168,13 @@ class GaitPhaseEstimator:
 
             for i in range(len(vgrf_data)):
                 writer.writerow([
-                    current_time[i],  # Time
+                    self.current_time[i],  # Time
                     interpolated_forces[i],  # Force
                     force_derivatives[i],  # Force derivative
                     interpolated_angles[i],  # Angle
                     angle_derivatives[i],  # Angle derivative
-                    gait_progress[i],  # Gait progress
-                    gait_phases[i]  # Phase
+                    self.gait_progress[i],  # Gait progress
+                    self.gait_phases[i]  # Phase
                 ])
 
         rospy.loginfo(f"Gait data saved successfully.")
