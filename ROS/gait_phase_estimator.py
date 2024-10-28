@@ -79,21 +79,21 @@ class GaitPhaseEstimator:
         # Initialize arrays to store derivatives and phases
         force_derivatives = np.gradient(interpolated_forces)
         angle_derivatives = np.gradient(interpolated_angles)
-        gait_phases = []
-        gait_progress = []
-        current_time = []
-        time_in_phase = []
-        estimated_stance_duration = 0.6 * 14.3 / 10
-        estimated_swing_duration = 0.4 * 14.3 / 10
+        self.gait_phases = []
+        self.gait_progress = []
+        self.current_time = []
+        self.time_in_phase = []
+        self.estimated_stance_duration = 0.6 * 14.3 / 10
+        self.estimated_swing_duration = 0.4 * 14.3 / 10
 
-        stance_start_time = None
-        swing_end_time = None
+        self.stance_start_time = None
+        self.swing_end_time = None
         
         # Variables pour suivre la durée des phases
-        total_stance_time = 0
-        total_swing_time = 0
-        stance_count = 0
-        swing_count = 0
+        self.total_stance_time = 0
+        self.total_swing_time = 0
+        self.stance_count = 0
+        self.swing_count = 0
         stance_duration = 0.6815521717071533
         time_before_training = vgrf_data[1,0]
 
