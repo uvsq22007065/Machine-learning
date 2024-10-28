@@ -110,15 +110,12 @@ class GaitPhaseEstimator:
                     self.stance_start_time = current_time[i]
                     time_in_phase_value = 0
                     time_in_phase.append(time_in_phase_value)  # Append to the list
+                    stance_count =+ 1
+                    if swing_count > 0:
+                        swing_duration = current_time[i] - self.swing_start_time
+                        total_swing_time =+ swing_duration
+                        estimated_swing_duration = total_swing_time/stance_count
 
-                if not self.in_stance_phase:
-                    progress = 0
-                    self.in_stance_phase = True
-                    self.previous_phase = "Stance Phase"
-                    self.stance_start_time = current_time[i]
-                    time_in_phase_value = 0
-                    time_in_phase.append(time_in_phase_value)  # Append to the list
-                
                 time_in_phase_value = current_time[i] - self.stance_start_time
                 time_in_phase.append(time_in_phase_value)  # Append to the list
 
@@ -133,14 +130,11 @@ class GaitPhaseEstimator:
                     self.swing_start_time = current_time[i]  # Starting point for the swing phase
                     time_in_phase_value = 0
                     time_in_phase.append(time_in_phase_value)  # Record time in swing phase
-
-                if self.in_stance_phase:
-                    progress = 60
-                    self.in_stance_phase = False
-                    self.previous_phase = "Swing Phase"
-                    self.swing_start_time = current_time[i]  # Starting point for the swing phase
-                    time_in_phase_value = 0
-                    time_in_phase.append(time_in_phase_value)  # Record time in swing phase
+                    swing_count =+ 1
+                    if stance_count > 0:
+                        stance_duration = current_time[i] - self.stance_start_time
+                        total_stance_time =+ stance_duration
+                        estimated_stance_duration = total_stance_time/stance_count
 
                 # Time spent in the swing phase
                 time_in_phase_value = current_time[i] - self.swing_start_time
