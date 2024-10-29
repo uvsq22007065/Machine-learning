@@ -135,23 +135,26 @@ class GaitPhaseEstimator:
                     previous_phase = "Swing Phase"
                     stance_time_in_phase_value = 0
                     stance_time_in_phase.append(stance_time_in_phase_value)
-                    swing_start_time = current_time[i]
-                    swing_time_in_phase_value = current_time[i] - swing_start_time
+                    swing_start_time = current_time[i]  # Correctly update swing start time here
+                    swing_time_in_phase_value = 0
                     swing_time_in_phase.append(swing_time_in_phase_value)
                     swing_count += 1
                     gait_progress.append(60)
+        
+                    # Swing duration calculations
                     if swing_count > 0:
                         swing_duration = current_time[i] - swing_start_time
                         total_swing_time += swing_duration
                         estimated_swing_duration = total_swing_time / swing_count
                 else:
+                    # Regular Swing Phase updates
                     stance_time_in_phase_value = 0
                     stance_time_in_phase.append(stance_time_in_phase_value)
                     swing_time_in_phase_value = current_time[i] - swing_start_time
                     swing_time_in_phase.append(swing_time_in_phase_value)
                     rospy.loginfo(f"Swing start time updated to: {swing_start_time}")
                     # Updated progress calculation
-                    progress = min(60 + (40 * (swing_time_in_phase[i] / estimated_swing_duration)),100)
+                    progress = min(60 + (40 * (swing_time_in_phase_value / estimated_swing_duration)), 100)
 
             # Append values
             gait_phases.append(phase)
