@@ -85,6 +85,7 @@ class GaitPhaseEstimator:
         estimated_phase_duration = None   # Durée totale estimée d'une phase complète (Stance + Swing)
         in_stance_phase = False  # Suivi de la phase actuelle
         phase_start_time = 0   # Heure de début de la phase actuelle
+        previous_phase = "Stance Phase"
         
         # Variables pour suivre la durée des phases
         total_stance_time = 0
@@ -102,21 +103,23 @@ class GaitPhaseEstimator:
             if force > 0:
                 phase = "Stance Phase"
                 if previous_phase == "Swing Phase":
+                    # Swing duration calculations
+                    if swing_count == 0:
+                        estimated_swing_duration = swing_duration
+                    elif swing_count > 0:
+                        swing_duration = current_time[i] - swing_start_time
+                        total_swing_time += swing_duration
+                        estimated_swing_duration = total_swing_time / swing_count
                     # Transition: Swing -> Stance
-                    progress = 0
                     in_stance_phase = True
                     previous_phase = "Stance Phase"
                     swing_time_in_phase_value = 0
                     swing_time_in_phase.append(swing_time_in_phase_value)
-                    if stance_count > 0:
-                        stance_duration = current_time[i] - stance_start_time
-                        total_stance_time += stance_duration
-                        estimated_stance_duration = total_stance_time / stance_count
                     stance_start_time = current_time[i]
                     stance_time_in_phase_value = current_time[i] - stance_start_time
                     stance_time_in_phase.append(stance_time_in_phase_value)
                     stance_count += 1
-                    gait_progress.append(0)
+                    progress = min((60 * (stance_time_in_phase[i] / estimated_stance_duration)), 60)
                 else:
                     # Regular Stance Phase updates
                     swing_time_in_phase_value = 0
@@ -129,8 +132,20 @@ class GaitPhaseEstimator:
             else:
                 phase = "Swing Phase"
                 if previous_phase == "Stance Phase":
+                    # stance duration calculations
+                    if stance_count == 0:
+                        estimated_stance_duration = stance_duration
+                    elif stance_count == 1:
+                        estimated_stance_duration = 0
+                        stance_duration = current_time[i] - stance_start_time
+                        total_stance_time += stance_duration
+                        estimated_stance_duration = total_stance_time / stance_count
+                    elif stance_count > 1:
+                        stance_duration = current_time[i] - stance_start_time
+                        total_stance_time += stance_duration
+                        estimated_stance_duration = total_stance_time / stance_count
                     # Transition: Stance -> Swing
-                    progress = 60
+                    progress = min(60 + (40 * (swing_time_in_phase_value / estimated_swing_duration)), 100)
                     in_stance_phase = False
                     previous_phase = "Swing Phase"
                     stance_time_in_phase_value = 0
@@ -139,21 +154,12 @@ class GaitPhaseEstimator:
                     swing_time_in_phase_value = 0
                     swing_time_in_phase.append(swing_time_in_phase_value)
                     swing_count += 1
-                    gait_progress.append(60)
-
-                    # Swing duration calculations
-                    if swing_count > 0:
-                        swing_duration = current_time[i] - swing_start_time
-                        total_swing_time += swing_duration
-                        estimated_swing_duration = total_swing_time / swing_count
                 else:
                     # Continuously update within Swing Phase
                     stance_time_in_phase_value = 0
                     stance_time_in_phase.append(stance_time_in_phase_value)
                     swing_time_in_phase_value = current_time[i] - swing_start_time
                     swing_time_in_phase.append(swing_time_in_phase_value)
-                    rospy.loginfo(f"Swing start time retained as: {swing_start_time}")
-
                     # Calculate progress from 60% to 100% based on swing phase duration
                     progress = min(60 + (40 * (swing_time_in_phase_value / estimated_swing_duration)), 100)
 
