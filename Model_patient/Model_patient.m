@@ -1,5 +1,5 @@
 % Charger les données depuis le fichier CSV 
-data = readtable('test_model (3).csv');
+data = readtable('test_model.csv');
 
 % Extraire les colonnes pertinentes
 time = data.Time;               % Temps
