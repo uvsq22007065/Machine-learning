@@ -10,31 +10,28 @@ from tensorflow.keras.layers import Conv1D, MaxPooling1D, Dense, Flatten, LSTM
 from tensorflow.keras.callbacks import EarlyStopping
 from tensorflow.keras.optimizers import Adam
 import time
+import pandas as pd
 
 # Démarrer le chronomètre
 start_time = time.time()
 
-# Démarrer le moteur MATLAB
-eng = matlab.engine.start_matlab()
+# Définir les chemins des fichiers CSV pour les données d'entraînement et de test
+train_file_path = 'C:/Users/Grégoire/OneDrive/Bureau/EPF/BRL/Machine learning/GaitPhaseEstimatorData/validation_labels.csv'
+test_file_path = 'C:/Users/Grégoire/OneDrive/Bureau/EPF/BRL/Machine learning/GaitPhaseEstimatorData/test_labels.csv'
 
-# Définir les chemins des scripts MATLAB pour les données d'entraînement et de test
-matlab_script_train = 'dynamics_estimator_hysteresis'
-matlab_script_test = 'dynamics_estimator_hysteresis_test'
+# Lire les fichiers CSV
+force_data_train = pd.read_csv(train_file_path)['Force'].values
+gait_vector_train = pd.read_csv(train_file_path)['Gait_Progress'].values
+gait_phases_train = pd.read_csv(train_file_path)['Phase'].values
+ankle_angles_filt_train = pd.read_csv(train_file_path)['Angle'].values
 
-# Exécuter les scripts MATLAB pour extraire les données
-eng.eval(matlab_script_train, nargout=0)
-force_data_train = eng.workspace['force_data']
-gait_vector_train = eng.workspace['gait_vector']
-gait_phases_train = eng.workspace['gait_phases']
-ankle_angles_filt_train = eng.workspace['ankle_angles_filt']
+force_data_test = pd.read_csv(test_file_path)['Force'].values
+gait_vector_test = pd.read_csv(test_file_path)['Gait_Progress'].values
+gait_phases_test = pd.read_csv(test_file_path)['Phase'].values
+ankle_angles_filt_test = pd.read_csv(test_file_path)['Angle'].values
 
-eng.eval(matlab_script_test, nargout=0)
-force_data_test = eng.workspace['force_data']
-gait_vector_test = eng.workspace['gait_vector']
-gait_phases_test = eng.workspace['gait_phases']
-ankle_angles_filt_test = eng.workspace['ankle_angles_filt_test']
-
-eng.quit()  # Arrêter le moteur MATLAB
+# Vous pouvez maintenant utiliser ces variables dans votre code
+print("Données d'entraînement et de test chargées avec succès.")
 
 # Conversion des données en tableaux numpy
 X_train = np.array(force_data_train).reshape(-1, 1)
@@ -130,13 +127,13 @@ early_stopping = EarlyStopping(monitor='loss', patience=10, restore_best_weights
 # Ajustement du modèle avec plus d'epochs et le callback d'early stopping
 model.fit(
     X_seq_train, y_seq_train, 
-    epochs=100,  # Augmentation du nombre d'epochs
+    epochs=25,  # Augmentation du nombre d'epochs
     batch_size=32,
     callbacks=[early_stopping]  # Ajout de l'early stopping
 )
 
 # Entraînement du modèle avec validation croisée
-model.fit(X_seq_train, y_seq_train, epochs=100, batch_size=32, validation_split=0.2, callbacks=[early_stopping], verbose=1)
+model.fit(X_seq_train, y_seq_train, epochs=25, batch_size=32, validation_split=0.2, callbacks=[early_stopping], verbose=1)
 
 # Prédictions
 y_pred = model.predict(X_seq_test).flatten()

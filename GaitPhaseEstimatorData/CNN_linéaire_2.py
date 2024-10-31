@@ -1,169 +1,143 @@
-import matlab.engine
 import numpy as np
-from sklearn.preprocessing import StandardScaler, LabelEncoder, PolynomialFeatures
-from sklearn.metrics import mean_squared_error, mean_absolute_error
-import matplotlib.pyplot as plt
-from scipy.interpolate import interp1d
+import pandas as pd
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.model_selection import KFold
 import tensorflow as tf
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Conv1D, MaxPooling1D, Dense, Flatten, LSTM, Dropout, TimeDistributed
+from tensorflow.keras.layers import LSTM, Dense
 from tensorflow.keras.callbacks import EarlyStopping
-from tensorflow.keras.optimizers import Adam
-import time
+from tensorflow.keras.losses import MeanSquaredError
+import matplotlib.pyplot as plt
 
-# Démarrer le chronomètre
-start_time = time.time()
+# Chemins vers les fichiers
+train_file_path = 'C:/Users/Grégoire/OneDrive/Bureau/EPF/BRL/Machine learning/GaitPhaseEstimatorData/validation_labels.csv'
+test_file_path = 'C:/Users/Grégoire/OneDrive/Bureau/EPF/BRL/Machine learning/GaitPhaseEstimatorData/test_labels.csv'
 
-# Démarrer le moteur MATLAB
-eng = matlab.engine.start_matlab()
+# Charger les données d'entraînement
+force_data_train = pd.read_csv(train_file_path)['Force'].values
+gait_vector_train = pd.read_csv(train_file_path)['Gait_Progress'].values
+gait_phases_train = pd.read_csv(train_file_path)['Phase'].values
+ankle_angles_filt_train = pd.read_csv(train_file_path)['Angle'].values
 
-# Définir les chemins des scripts MATLAB pour les données d'entraînement et de test
-matlab_script_train = 'dynamics_estimator_hysteresis'
-matlab_script_test = 'dynamics_estimator_hysteresis_test'
+# Charger les données de test
+force_data_test = pd.read_csv(test_file_path)['Force'].values
+gait_vector_test = pd.read_csv(test_file_path)['Gait_Progress'].values
+gait_phases_test = pd.read_csv(test_file_path)['Phase'].values
+ankle_angles_filt_test = pd.read_csv(test_file_path)['Angle'].values
 
-# Exécuter les scripts MATLAB pour extraire les données
-eng.eval(matlab_script_train, nargout=0)
-force_data_train = eng.workspace['force_data']
-gait_vector_train = eng.workspace['gait_vector']
-gait_phases_train = eng.workspace['gait_phases']
-ankle_angles_filt_train = eng.workspace['ankle_angles_filt']
+# Fonction pour calculer les dérivées
+def calculate_derivatives(data):
+    return np.diff(data, prepend=data[0])
 
-eng.eval(matlab_script_test, nargout=0)
-force_data_test = eng.workspace['force_data']
-gait_vector_test = eng.workspace['gait_vector']
-gait_phases_test = eng.workspace['gait_phases']
-ankle_angles_filt_test = eng.workspace['ankle_angles_filt_test']
+# Calcul des dérivées pour les données d'entraînement
+gait_progress_derivative_train = calculate_derivatives(gait_vector_train)
+ankle_angle_derivative_train = calculate_derivatives(ankle_angles_filt_train)
+vGRF_derivative_train = calculate_derivatives(force_data_train)
 
-eng.quit()  # Arrêter le moteur MATLAB
+# Calcul des dérivées pour les données de test
+gait_progress_derivative_test = calculate_derivatives(gait_vector_test)
+ankle_angle_derivative_test = calculate_derivatives(ankle_angles_filt_test)
+vGRF_derivative_test = calculate_derivatives(force_data_test)
 
-# Conversion des données en tableaux numpy
-X_train = np.array(force_data_train).reshape(-1, 1)
-y_train = np.array(gait_vector_train).flatten()
-z_train = np.array(gait_phases_train).flatten()
-a_train = np.array(ankle_angles_filt_train).flatten()
-
-X_test = np.array(force_data_test).reshape(-1, 1)
-y_test = np.array(gait_vector_test).flatten()
-z_test = np.array(gait_phases_test).flatten()
-a_test = np.array(ankle_angles_filt_test).flatten()
-
-# Encodage des phases de marche
-label_encoder = LabelEncoder()
-z_train = label_encoder.fit_transform(z_train)
-z_test = label_encoder.transform(z_test)
-
-# Interpolation des données à 100 Hz
-def interpolate_data(data, original_freq=60, target_freq=100):
-    t_original = np.linspace(0, len(data) / original_freq, len(data))
-    t_target = np.linspace(0, len(data) / original_freq, int(len(data) * target_freq / original_freq))
-    interp_func = interp1d(t_original, data, kind='cubic')
-    return interp_func(t_target)
-
-a_train_100Hz = interpolate_data(a_train)
-a_test_100Hz = interpolate_data(a_test)
-
-# Calcul des dérivées
-a_train_derivative = np.diff(a_train_100Hz, axis=0)
-a_test_derivative = np.diff(a_test_100Hz, axis=0)
-
-# Préparation des caractéristiques combinées
-def prepare_features(X, z, a_100Hz, a_derivative):
-    min_length = min(len(X), len(z), len(a_100Hz), len(a_derivative))
-    X, z, a_100Hz, a_derivative = X[:min_length], z[:min_length], a_100Hz[:min_length], a_derivative[:min_length]
-
-    # Calcul des dérivées de la force
-    X_derivative = np.diff(X, axis=0)
-    X, z, a_100Hz, a_derivative = X[:-1], z[:-1], a_100Hz[:-1], a_derivative[:-1]
-
-    # Combinaison des caractéristiques
-    features = np.hstack((X, z.reshape(-1, 1), X_derivative, a_100Hz.reshape(-1, 1), a_derivative.reshape(-1, 1)))
-
-    # Ajout de transformations polynomiales de degré 2
-    poly = PolynomialFeatures(degree=2, include_bias=False)
-    features_poly = poly.fit_transform(features)
-    
-    return features_poly
-
-X_combined_train = prepare_features(X_train, z_train, a_train_100Hz, a_train_derivative)
-X_combined_test = prepare_features(X_test, z_test, a_test_100Hz, a_test_derivative)
-
-# Standardisation des caractéristiques (fit sur les données d'entraînement uniquement)
-scaler = StandardScaler()
-X_combined_scaled_train = scaler.fit_transform(X_combined_train)
-X_combined_scaled_test = scaler.transform(X_combined_test)
-
-# Ajuster les longueurs pour l'alignement avant de créer les séquences
-min_length_train = min(len(X_combined_scaled_train), len(y_train))
-X_combined_scaled_train = X_combined_scaled_train[:min_length_train]
-y_train = y_train[:min_length_train]
-
-min_length_test = min(len(X_combined_scaled_test), len(y_test))
-X_combined_scaled_test = X_combined_scaled_test[:min_length_test]
-y_test = y_test[:min_length_test]
-
-# Création des séquences avec un décalage
-def create_sequences(data, labels, seq_length):
-    sequences, label_sequences = [], []
-    for i in range(len(data) - seq_length + 1):
-        sequences.append(data[i:i + seq_length])
-        # Moyenne de plusieurs points de la séquence pour la sortie
-        label_sequences.append(np.mean(labels[i:i + seq_length]))  
-    return np.array(sequences), np.array(label_sequences)
-
-seq_length = 15
-X_seq_train, y_seq_train = create_sequences(X_combined_scaled_train, y_train, seq_length)
-X_seq_test, y_seq_test = create_sequences(X_combined_scaled_test, y_test, seq_length)
-
-# Modèle CNN avec LSTM, Dropout et TimeDistributed
-model = Sequential([
-    Conv1D(128, kernel_size=3, activation='relu', input_shape=(X_seq_train.shape[1], X_seq_train.shape[2])),
-    MaxPooling1D(pool_size=2),
-    Dropout(0.3),  # Régularisation avec dropout
-    Conv1D(64, kernel_size=3, activation='relu'),
-    MaxPooling1D(pool_size=2),
-    Dropout(0.3),
-    LSTM(100, return_sequences=True),
-    TimeDistributed(Dense(50, activation='relu')),
-    Flatten(),
-    Dense(1, activation='linear')
+# Préparation des caractéristiques d'entrée et des cibles pour l'entraînement
+X_train = np.column_stack([
+    gait_progress_derivative_train,
+    ankle_angle_derivative_train,
+    vGRF_derivative_train,
+    ankle_angles_filt_train,
+    force_data_train
 ])
+y_train = gait_vector_train
 
-# Compiler le modèle avec un taux d'apprentissage réduit
-model.compile(optimizer=Adam(learning_rate=0.00005), loss='mse', metrics=['mae'])
+# Préparation des caractéristiques d'entrée et des cibles pour le test
+X_test = np.column_stack([
+    gait_progress_derivative_test,
+    ankle_angle_derivative_test,
+    vGRF_derivative_test,
+    ankle_angles_filt_test,
+    force_data_test
+])
+y_test = gait_vector_test
 
-# Callback pour l'early stopping
-early_stopping = EarlyStopping(monitor='loss', patience=15, restore_best_weights=True)
+# Normalisation des données d'entraînement
+scaler_X = MinMaxScaler()
+X_train_scaled = scaler_X.fit_transform(X_train)
+scaler_y = MinMaxScaler()
+y_train_scaled = scaler_y.fit_transform(y_train.reshape(-1, 1)).flatten()
 
-# Entraînement du modèle
-model.fit(
-    X_seq_train, y_seq_train, 
-    epochs=200, 
-    batch_size=64, 
-    validation_split=0.2, 
-    callbacks=[early_stopping], 
-    verbose=1
-)
+# Normalisation des données de test avec les mêmes scalers d'entraînement
+X_test_scaled = scaler_X.transform(X_test)
+y_test_scaled = scaler_y.transform(y_test.reshape(-1, 1)).flatten()
 
-# Prédictions
-y_pred = model.predict(X_seq_test).flatten()
+# Reshaper les données pour le modèle LSTM
+X_train_lstm = np.reshape(X_train_scaled, (X_train_scaled.shape[0], 1, X_train_scaled.shape[1]))
+X_test_lstm = np.reshape(X_test_scaled, (X_test_scaled.shape[0], 1, X_test_scaled.shape[1]))
 
-# Calcul des erreurs pour le complémentaire
-y_pred_complement = 100 - y_pred
-mse_complement = mean_squared_error(y_seq_test, y_pred_complement)
-mae_complement = mean_absolute_error(y_seq_test, y_pred_complement)
-print(f"Mean Squared Error (complement): {mse_complement:.2f}")
-print(f"Mean Absolute Error (complement): {mae_complement:.2f}")
+# Fonction de coût pondérée pour accentuer les erreurs dans les transitions
+def weighted_mse(y_true, y_pred):
+    weights = tf.where((y_true > 0.6) & (y_true < 1.0), 2.0, 1.0)  # Poids doublé pour les transitions
+    return MeanSquaredError()(y_true, y_pred) * weights
 
-# Tracé de la progression réelle vs prédite avec complémentaire
-plt.figure()
-plt.plot(y_seq_test, label="True gait progress")
-plt.plot(y_pred_complement, label="Complement Prediction")
+# Création du modèle LSTM
+def create_lstm_model(input_shape):
+    model = Sequential([
+        LSTM(64, return_sequences=True, input_shape=input_shape),
+        LSTM(32),
+        Dense(1)
+    ])
+    model.compile(optimizer='adam', loss=weighted_mse, metrics=['mse'])
+    return model
+
+# Validation croisée sur les données d'entraînement
+kf = KFold(n_splits=5)
+fold = 1
+val_losses = []
+
+for train_index, val_index in kf.split(X_train_lstm):
+    print(f"Training fold {fold}...")
+    X_tr, X_val = X_train_lstm[train_index], X_train_lstm[val_index]
+    y_tr, y_val = y_train_scaled[train_index], y_train_scaled[val_index]
+    
+    model = create_lstm_model((X_tr.shape[1], X_tr.shape[2]))
+    
+    # Early stopping pour éviter le surajustement
+    early_stopping = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
+    
+    # Entraînement du modèle
+    history = model.fit(X_tr, y_tr, 
+                        epochs=15, 
+                        batch_size=32, 
+                        validation_data=(X_val, y_val),
+                        callbacks=[early_stopping], 
+                        verbose=1)
+    
+    val_loss = min(history.history['val_loss'])
+    val_losses.append(val_loss)
+    print(f"Fold {fold} - Validation Loss: {val_loss}")
+    fold += 1
+
+# Evaluation finale
+print("Validation losses for each fold:", val_losses)
+print("Average validation loss:", np.mean(val_losses))
+
+# Prédictions sur l'ensemble de test et dénormalisation pour l'affichage
+y_pred_scaled = model.predict(X_test_lstm)
+y_pred = scaler_y.inverse_transform(y_pred_scaled).flatten()
+y_true = scaler_y.inverse_transform(y_test_scaled.reshape(-1, 1)).flatten()
+
+# Affichage des résultats
+plt.plot(y_true, label="True gait progress")
+plt.plot(y_pred, label="Prediction", alpha=0.7)
 plt.xlabel("Samples")
 plt.ylabel("Progression (%)")
-plt.title("Comparaison gait progress (Complement)")
+plt.title("Comparaison gait progress (Test set)")
 plt.legend()
 plt.show()
 
-# Calculer le temps d'exécution
-elapsed_time = time.time() - start_time
-print(f"Temps d'exécution: {elapsed_time:.2f} secondes")
+from sklearn.metrics import mean_squared_error, mean_absolute_error
+
+# Calcul des erreurs
+mse = mean_squared_error(y_seq_test, y_pred)
+mae = mean_absolute_error(y_seq_test, y_pred)
+print(f"Mean Squared Error: {mse:.2f}")
+print(f"Mean Absolute Error: {mae:.2f}")

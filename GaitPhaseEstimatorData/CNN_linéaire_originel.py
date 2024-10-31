@@ -13,33 +13,24 @@ import time
 # Démarrer le chronomètre
 start_time = time.time()
 
-# Start MATLAB engine
-eng = matlab.engine.start_matlab()
+import pandas as pd
+# Définir les chemins des fichiers CSV pour les données d'entraînement et de test
+train_file_path = 'C:/Users/Grégoire/OneDrive/Bureau/EPF/BRL/Machine learning/GaitPhaseEstimatorData/validation_labels.csv'
+test_file_path = 'C:/Users/Grégoire/OneDrive/Bureau/EPF/BRL/Machine learning/GaitPhaseEstimatorData/test_labels.csv'
 
-# Define the MATLAB script paths for training and testing data
-matlab_script_train = 'dynamics_estimator_hysteresis'
-matlab_script_test = 'dynamics_estimator_hysteresis_test'
+# Lire les fichiers CSV
+force_data_train = pd.read_csv(train_file_path)['Force'].values
+gait_vector_train = pd.read_csv(train_file_path)['Gait_Progress'].values
+gait_phases_train = pd.read_csv(train_file_path)['Phase'].values
+ankle_angles_filt_train = pd.read_csv(train_file_path)['Angle'].values
 
-# Run the MATLAB script to extract force data and gait vector for training
-eng.eval(matlab_script_train, nargout=0)
+force_data_test = pd.read_csv(test_file_path)['Force'].values
+gait_vector_test = pd.read_csv(test_file_path)['Gait_Progress'].values
+gait_phases_test = pd.read_csv(test_file_path)['Phase'].values
+ankle_angles_filt_test = pd.read_csv(test_file_path)['Angle'].values
 
-# Retrieve force data and gait phases from Matlab workspace for training
-force_data_train = eng.workspace['force_data']
-gait_vector_train = eng.workspace['gait_vector']
-gait_phases_train = eng.workspace['gait_phases']
-ankle_angles_filt_train = eng.workspace['ankle_angles_filt']
-
-# Run the MATLAB script to extract force data and gait vector for testing
-eng.eval(matlab_script_test, nargout=0)
-
-# Retrieve force data and gait phases from Matlab workspace for testing
-force_data_test = eng.workspace['force_data']
-gait_vector_test = eng.workspace['gait_vector']
-gait_phases_test = eng.workspace['gait_phases']
-ankle_angles_filt_test = eng.workspace['ankle_angles_filt_test']
-
-# Stop MATLAB engine
-eng.quit()
+# Vous pouvez maintenant utiliser ces variables dans votre code
+print("Données d'entraînement et de test chargées avec succès.")
 
 # Assuming 'force_data', 'gait_phases', and 'gait_vector' are arrays from the MATLAB output
 X_train = np.array(force_data_train).reshape(-1, 1)  # Force data as feature
