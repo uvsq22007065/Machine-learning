@@ -326,42 +326,74 @@ for i = 1:length(heel_force)
     end
 end
 
-% Pour chaque cycle détecté, marquer les pourcentages (10%, 20%, ..., 100%)
-for c = 1:length(cycle_starts)-1
+% Fusion des calculs et annotations pour chaque cycle détecté
+for c = 1:length(cycle_starts) - 1
     cycle_start = cycle_starts(c);
-    cycle_end = cycle_starts(c+1) - 1;
-    cycle_length = (cycle_end - cycle_start + 1);
+    cycle_end = cycle_starts(c + 1) - 1;
+    cycle_length = cycle_end - cycle_start + 1;
     progression = linspace(0, 100, cycle_length); % Progression de 0% à 100% pour chaque cycle
-    
+
+    % Affectation des valeurs de progression au tableau `percent_progression`
+    percent_progression(cycle_start:cycle_end) = progression;
+
     % Marquer les changements de phase pour ce cycle
     for i = cycle_start:cycle_end
         if ismember(i, phase_change_indices)
-            % Calculer le pourcentage de progression
-            percent_progression(i) = round(progression(i - cycle_start + 1));  % Pourcentage correspondant à l'index
-            
-            % Ajuster la position des annotations pour éviter le chevauchement
+            % Calcul du pourcentage de progression pour l'index du changement de phase
+            phase_progression = round(progression(i - cycle_start + 1));  % Pourcentage correspondant à l'index
             max_force = max([true_heel_force(i), true_mid_force(i), true_toe_force(i)]);
+
             % Annoter avec phase et pourcentage
-            text(i, max_force + 0.02, sprintf('%s (%d%%)', gait_phases{i}, percent_progression(i)), ...
+            text(i, max_force + 0.02, sprintf('%s (%d%%)', gait_phases{i}, phase_progression), ...
                 'FontSize', 8, 'HorizontalAlignment', 'center');
         end
     end
-    
-    % Marquer les dizaines de pourcent (10%, 20%, ...) directement sur la courbe
+
+    % Marquer les dizaines de pourcent (10%, 20%, ...) directement sur la courbe pour chaque cycle
     for p = 10:10:100
         index_in_cycle = find(progression >= p, 1) + cycle_start - 1;
+        max_force_at_index = max([true_heel_force(index_in_cycle), true_mid_force(index_in_cycle), true_toe_force(index_in_cycle)]);
         
         % Ajouter les pourcentages au-dessus des courbes
-        max_force_at_index = max([true_heel_force(index_in_cycle), true_mid_force(index_in_cycle), true_toe_force(index_in_cycle)]);
         text(index_in_cycle, max_force_at_index + 0.01, [num2str(p), '%'], 'FontSize', 8, 'HorizontalAlignment', 'center');
     end
 end
+
+clean_percent_progression = percent_progression(~isnan(percent_progression));
 
 % Output the force data and gait phases to the Matlab workspace for Python access
 assignin('base', 'force_data', true_total_forces);  % Output all force data
 assignin('base', 'gait_phases', gait_phases);       % Output gait phases based on force conditions
 assignin('base', 'phase_change_indices', phase_change_indices);  % Store phase change indices for reference
 assignin('base', 'phase_labels', phase_labels);  % Store labels for phases
-assignin('base', 'gait_vector', percent_progression);
+assignin('base', 'gait_vector', clean_percent_progression);
 assignin('base','ankle_angles_shank_filt', filtered_shank);
 assignin('base','ankle_angles_foot_filt', filtered_foot);
+
+%% Dérivées
+% Calcul des dérivées
+force_derivative = diff(true_total_forces);  % Dérivée des forces
+angle_derivative = diff(ankle_angles_filt);   % Dérivée des angles
+
+% Pour afficher, nous devons ajuster la longueur des dérivées
+time_vector_force = (0:length(true_total_forces)-2)';  % Vecteur temps pour les forces
+time_vector_angle = (0:length(ankle_angles_filt)-2)';   % Vecteur temps pour les angles
+
+% Création de la figure
+figure;
+
+% Tracé des dérivées des forces
+subplot(2, 1, 1);  % Création d'un sous-graphique
+plot(time_vector_force, force_derivative, 'b');  % Dérivée des forces en bleu
+title('Dérivée des Forces');
+xlabel('Temps');
+ylabel('Dérivée de la Force (N/s)');
+grid on;
+
+% Tracé des dérivées des angles
+subplot(2, 1, 2);  % Création d'un autre sous-graphique
+plot(time_vector_angle, angle_derivative, 'r');  % Dérivée des angles en rouge
+title('Dérivée des Angles');
+xlabel('Temps');
+ylabel('Dérivée de Angle (rad/s)');
+grid on;

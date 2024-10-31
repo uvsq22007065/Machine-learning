@@ -238,6 +238,7 @@ grid on;
 
 %% Determine Gait Phases
 %% Calibrage
+%% Calibrage
 % Initialisation des variables
 heel_force = sum(insole_data.DataFilt(:,12:16), 2);
 mid_force = sum(insole_data.DataFilt(:,6:11), 2);
@@ -248,19 +249,19 @@ phase_change_indices = []; % Indices de changements de phase
 phase_labels = {}; % Labels des phases
 in_cycle_TO = false;  % Indicateur de cycle
 in_cycle_FF = false;
-total_force = zeros(size(heel_force)); % Assurez-vous que total_force a la bonne taille
+total_force = zeros(size(heel_force));
 true_heel_force = zeros(size(heel_force));
 true_mid_force = zeros(size(heel_force));
 true_toe_force = zeros(size(heel_force));
 true_total_forces = zeros(size(heel_force));
-percent_progression = [];
+percent_progression = NaN(size(heel_force)); % Initialisation pour tous les points de progression
 
 % Calibrage
 known_force = 1;
 
-for i = 1:length(heel_force)  % Itération sur chaque index
+for i = 1:length(heel_force)
     if (heel_force(i) > 333) || (mid_force(i) > 333) || (toe_force(i) > 333)
-        total_force(i) = heel_force(i) + mid_force(i) + toe_force(i);  % Corriger ici
+        total_force(i) = heel_force(i) + mid_force(i) + toe_force(i);
         true_heel_force(i) = known_force * heel_force(i) / total_force(i);
         true_mid_force(i) = known_force * mid_force(i) / total_force(i);
         true_toe_force(i) = known_force * toe_force(i) / total_force(i);
@@ -273,93 +274,87 @@ for i = 1:length(heel_force)  % Itération sur chaque index
     end
 end
 
-% Maintenant, plottez true forces
-figure; % Crée une nouvelle figure pour éviter les superpositions
-% plot(true_heel_force, 'b'); hold on;
-% plot(true_mid_force, 'g'); 
-% plot(true_toe_force, 'r'); 
+% Affichage des forces normalisées
+figure;
 plot(true_total_forces)
 title('True Forces');
 xlabel('Time');
 ylabel('Force (N)');
 legend('Normalized Force');
-% legend('Force du talon', 'Force du médio-pied', 'Force des orteils', 'Force maximale');
 grid on;
 hold on;
 
-% Détection des phases de marche en fonction des conditions sur les forces
+% Détection des phases de marche et calcul de progression de pourcentage
 for i = 1:length(heel_force)
     if true_heel_force(i) > 0.2 && (true_mid_force(i) < 0.1 || true_toe_force(i) < 0.1)
         phase = 'HS';
-        
-        % Enregistrer le début d'un nouveau cycle lors d'un Heel Strike
-        if isempty(cycle_starts) || (i - cycle_starts(end)) > 100  % Assurer qu'on ne détecte pas plusieurs fois le même cycle
+        if isempty(cycle_starts) || (i - cycle_starts(end)) > 100
             cycle_starts = [cycle_starts, i];
-            in_cycle_TO = true;  % Indiquer que nous sommes maintenant dans un cycle
+            in_cycle_TO = true;
             in_cycle_FF = true;
         end
     elseif true_heel_force(i) < 0.1 && true_mid_force(i) < 0.1 && true_toe_force(i) < 0.1
         phase = 'MSW';
-        
     elseif true_heel_force(i) < 0.4 && true_mid_force(i) < 0.3 && true_toe_force(i) < 0.5
-        if in_cycle_TO  % Vérifiez si nous sommes toujours dans le cycle
+        if in_cycle_TO
             phase = 'TO';
-            in_cycle_TO = false;  % Sortir du cycle après détection de TO
+            in_cycle_TO = false;
         end
-        
     elseif true_mid_force(i) > 0.3 && true_heel_force(i) < 0.3 && true_toe_force(i) > 0.25
         phase = 'HO';
-             
     elseif true_heel_force(i) > 0.25 && true_mid_force(i) > 0.25
-        if in_cycle_FF  % Vérifiez si nous sommes toujours dans le cycle
+        if in_cycle_FF
             phase = 'FF/MST';
-            in_cycle_FF = false;  % Sortir du cycle après détection de TO
+            in_cycle_FF = false;
         end
     end
     
     gait_phases{i} = phase;
 
-    % Détecter les changements de phase
     if i == 1 || ~strcmp(gait_phases{i}, gait_phases{i-1})
-        phase_change_indices = [phase_change_indices, i]; % Enregistrer les indices de changement de phase
-        phase_labels = [phase_labels, phase]; % Enregistrer les labels des phases
+        phase_change_indices = [phase_change_indices, i];
+        phase_labels = [phase_labels, phase];
     end
 end
 
-% Pour chaque cycle détecté, marquer les pourcentages (10%, 20%, ..., 100%)
-for c = 1:length(cycle_starts)-1
+% Fusion des calculs et annotations pour chaque cycle détecté
+for c = 1:length(cycle_starts) - 1
     cycle_start = cycle_starts(c);
-    cycle_end = cycle_starts(c+1) - 1;
-    cycle_length = (cycle_end - cycle_start + 1);
+    cycle_end = cycle_starts(c + 1) - 1;
+    cycle_length = cycle_end - cycle_start + 1;
     progression = linspace(0, 100, cycle_length); % Progression de 0% à 100% pour chaque cycle
-    
+
+    % Affectation des valeurs de progression au tableau `percent_progression`
+    percent_progression(cycle_start:cycle_end) = progression;
+
     % Marquer les changements de phase pour ce cycle
     for i = cycle_start:cycle_end
         if ismember(i, phase_change_indices)
-            % Calculer le pourcentage de progression
-            percent_progression(i) = round(progression(i - cycle_start + 1));  % Pourcentage correspondant à l'index
-            
-            % Ajuster la position des annotations pour éviter le chevauchement
+            % Calcul du pourcentage de progression pour l'index du changement de phase
+            phase_progression = round(progression(i - cycle_start + 1));  % Pourcentage correspondant à l'index
             max_force = max([true_heel_force(i), true_mid_force(i), true_toe_force(i)]);
+
             % Annoter avec phase et pourcentage
-            text(i, max_force + 0.02, sprintf('%s (%d%%)', gait_phases{i}, percent_progression(i)), ...
+            text(i, max_force + 0.02, sprintf('%s (%d%%)', gait_phases{i}, phase_progression), ...
                 'FontSize', 8, 'HorizontalAlignment', 'center');
         end
     end
-    
-    % Marquer les dizaines de pourcent (10%, 20%, ...) directement sur la courbe
+
+    % Marquer les dizaines de pourcent (10%, 20%, ...) directement sur la courbe pour chaque cycle
     for p = 10:10:100
         index_in_cycle = find(progression >= p, 1) + cycle_start - 1;
+        max_force_at_index = max([true_heel_force(index_in_cycle), true_mid_force(index_in_cycle), true_toe_force(index_in_cycle)]);
         
         % Ajouter les pourcentages au-dessus des courbes
-        max_force_at_index = max([true_heel_force(index_in_cycle), true_mid_force(index_in_cycle), true_toe_force(index_in_cycle)]);
         text(index_in_cycle, max_force_at_index + 0.01, [num2str(p), '%'], 'FontSize', 8, 'HorizontalAlignment', 'center');
     end
 end
 
-% Output the force data and gait phases to the Matlab workspace for Python access
-assignin('base', 'force_data', true_total_forces);  % Output all force data
-assignin('base', 'gait_phases', gait_phases);       % Output gait phases based on force conditions
-assignin('base', 'phase_change_indices', phase_change_indices);  % Store phase change indices for reference
-assignin('base', 'phase_labels', phase_labels);  % Store labels for phases
-assignin('base', 'gait_vector', percent_progression);
+clean_percent_progression = percent_progression(~isnan(percent_progression));
+
+% Exporter les données et phases pour l'accès Python
+assignin('base', 'force_data', true_total_forces);
+assignin('base', 'gait_phases', gait_phases);
+assignin('base', 'phase_change_indices', phase_change_indices);
+assignin('base', 'phase_labels', phase_labels);
+assignin('base', 'gait_vector', clean_percent_progression);
