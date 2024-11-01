@@ -16,7 +16,7 @@ import os
 start_time = time.time()
 
 # Définir les chemins des fichiers CSV pour les données d'entraînement et de test
-train_file_path = "validation_labels.csv"
+train_file_path = "C:/Users/Grégoire/OneDrive/Bureau/EPF/BRL/Machine learning/GaitPhaseEstimatorData/validation_labels.csv"
 
 # Lire les fichiers CSV
 force_data_train = pd.read_csv(train_file_path)['Force'].values
@@ -94,7 +94,7 @@ model.fit(
 # Entraînement du modèle avec validation croisée
 model.fit(X_seq_train, y_seq_train, epochs=10, batch_size=32, callbacks=[early_stopping], verbose=1)
 
-test_file_path = "test_labels.csv"
+test_file_path = "C:/Users/Grégoire/OneDrive/Bureau/EPF/BRL/Machine learning/GaitPhaseEstimatorData/test_labels.csv"
 
 force_data_test = pd.read_csv(test_file_path)['Force'].values
 force_Derivative_data_test = pd.read_csv(test_file_path)['Force_Derivative'].values
