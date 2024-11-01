@@ -16,8 +16,8 @@ import os
 start_time = time.time()
 
 # Définir les chemins des fichiers CSV pour les données d'entraînement et de test
-train_file_path = "validation_labels.csv"
-test_file_path = "test_labels.csv"
+train_file_path = "C:/Users/Grégoire/OneDrive/Bureau/EPF/BRL/Machine learning/GaitPhaseEstimatorData/validation_labels.csv"
+test_file_path = "C:/Users/Grégoire/OneDrive/Bureau/EPF/BRL/Machine learning/GaitPhaseEstimatorData/test_labels.csv"
 
 # Lire les fichiers CSV
 force_data_train = pd.read_csv(train_file_path)['Force'].values
