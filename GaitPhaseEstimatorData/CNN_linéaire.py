@@ -1,4 +1,3 @@
-import matlab.engine
 import numpy as np
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.metrics import mean_squared_error, mean_absolute_error
@@ -11,13 +10,14 @@ from tensorflow.keras.callbacks import EarlyStopping
 from tensorflow.keras.optimizers import Adam
 import time
 import pandas as pd
+import os
 
 # Démarrer le chronomètre
 start_time = time.time()
 
 # Définir les chemins des fichiers CSV pour les données d'entraînement et de test
-train_file_path = 'C:/Users/Grégoire/OneDrive/Bureau/EPF/BRL/Machine learning/GaitPhaseEstimatorData/validation_labels.csv'
-test_file_path = 'C:/Users/Grégoire/OneDrive/Bureau/EPF/BRL/Machine learning/GaitPhaseEstimatorData/test_labels.csv'
+train_file_path = "validation_labels.csv"
+test_file_path = "test_labels.csv"
 
 # Lire les fichiers CSV
 force_data_train = pd.read_csv(train_file_path)['Force'].values
@@ -49,37 +49,27 @@ label_encoder = LabelEncoder()
 z_train = label_encoder.fit_transform(z_train)
 z_test = label_encoder.transform(z_test)
 
-# Interpolation des données à 100 Hz
-def interpolate_data(data, original_freq=60, target_freq=100):
-    t_original = np.linspace(0, len(data) / original_freq, len(data))
-    t_target = np.linspace(0, len(data) / original_freq, int(len(data) * target_freq / original_freq))
-    interp_func = interp1d(t_original, data, kind='cubic')  # Interpolation cubique pour plus de précision
-    return interp_func(t_target)
-
-a_train_100Hz = interpolate_data(a_train)
-a_test_100Hz = interpolate_data(a_test)
-
 # Calcul des dérivées
-a_train_derivative = np.diff(a_train_100Hz, axis=0)
-a_test_derivative = np.diff(a_test_100Hz, axis=0)
+a_train_derivative = np.diff(a_train, axis=0)
+a_test_derivative = np.diff(a_test, axis=0)
 
 # Concaténation des caractéristiques
-def prepare_features(X, a_100Hz, a_derivative):
+def prepare_features(X, a, a_derivative):
     # Troncature pour s'assurer que toutes les séries ont la même longueur
-    min_length = min(len(X), len(a_100Hz), len(a_derivative))
-    X, a_100Hz, a_derivative = X[:min_length], a_100Hz[:min_length], a_derivative[:min_length]
+    min_length = min(len(X), len(a), len(a_derivative))
+    X, a, a_derivative = X[:min_length], a[:min_length], a_derivative[:min_length]
 
     # Calcul des dérivées de la force
     X_derivative = np.diff(X, axis=0)
     X = X[:-1]  # Troncature pour correspondre aux dérivées
-    a_100Hz, a_derivative = a_100Hz[:-1], a_derivative[:-1]
+    a, a_derivative = a[:-1], a_derivative[:-1]
 
     # Combinaison des caractéristiques
-    features = np.hstack((X, X_derivative, a_100Hz.reshape(-1, 1), a_derivative.reshape(-1, 1)))
+    features = np.hstack((X, X_derivative, a.reshape(-1, 1), a_derivative.reshape(-1, 1)))
     return features
 
-X_combined_train = prepare_features(X_train, a_train_100Hz, a_train_derivative)
-X_combined_test = prepare_features(X_test, a_test_100Hz, a_test_derivative)
+X_combined_train = prepare_features(X_train, a_train, a_train_derivative)
+X_combined_test = prepare_features(X_test, a_test, a_test_derivative)
 
 # Standardisation des caractéristiques
 scaler = StandardScaler()
@@ -133,7 +123,7 @@ model.fit(
 )
 
 # Entraînement du modèle avec validation croisée
-model.fit(X_seq_train, y_seq_train, epochs=10, batch_size=32, validation_split=0.2, callbacks=[early_stopping], verbose=1)
+model.fit(X_seq_train, y_seq_train, epochs=10, batch_size=32, callbacks=[early_stopping], verbose=1)
 
 # Prédictions
 y_pred = model.predict(X_seq_test).flatten()
