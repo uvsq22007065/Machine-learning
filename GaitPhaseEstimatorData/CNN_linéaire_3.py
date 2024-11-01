@@ -61,17 +61,17 @@ a_train_derivative = np.diff(a_train_100Hz, axis=0)
 a_test_derivative = np.diff(a_test_100Hz, axis=0)
 
 # Concaténation des caractéristiques
-def prepare_features(X, z, a_100Hz, a_derivative):
-    min_length = min(len(X), len(z), len(a_100Hz), len(a_derivative))
-    X, z, a_100Hz, a_derivative = X[:min_length], z[:min_length], a_100Hz[:min_length], a_derivative[:min_length]
+def prepare_features(X, a_100Hz, a_derivative):
+    min_length = min(len(X), len(a_100Hz), len(a_derivative))
+    X, a_100Hz, a_derivative = X[:min_length], a_100Hz[:min_length], a_derivative[:min_length]
     X_derivative = np.diff(X, axis=0)
     X = X[:-1]
-    z, a_100Hz, a_derivative = z[:-1], a_100Hz[:-1], a_derivative[:-1]
-    features = np.hstack((X, z.reshape(-1, 1), X_derivative, a_100Hz.reshape(-1, 1), a_derivative.reshape(-1, 1)))
+    a_100Hz, a_derivative = a_100Hz[:-1], a_derivative[:-1]
+    features = np.hstack((X, X_derivative, a_100Hz.reshape(-1, 1), a_derivative.reshape(-1, 1)))
     return features
 
-X_combined_train = prepare_features(X_train, z_train, a_train_100Hz, a_train_derivative)
-X_combined_test = prepare_features(X_test, z_test, a_test_100Hz, a_test_derivative)
+X_combined_train = prepare_features(X_train, a_train_100Hz, a_train_derivative)
+X_combined_test = prepare_features(X_test, a_test_100Hz, a_test_derivative)
 
 # Standardisation des caractéristiques
 scaler = StandardScaler()
@@ -121,7 +121,7 @@ model.compile(optimizer=Adam(learning_rate=0.0005), loss='mse', metrics=['mae'])
 early_stopping = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
 
 # Ajustement du modèle
-model.fit(train_data, epochs=25, validation_data=test_data, callbacks=[early_stopping])
+model.fit(train_data, epochs=20, validation_data=test_data, callbacks=[early_stopping])
 
 # Prédictions
 y_pred = model.predict(X_seq_test).flatten()
@@ -154,3 +154,25 @@ plt.ylabel("Prédiction")
 plt.title("Vrai vs Prédiction Gait Progress")
 plt.grid(True)
 plt.show()
+
+# Imprimer les informations pour train_data
+for features_batch, labels_batch in train_data.take(1):  # On prend seulement le premier batch
+    print("Train Data:")
+    print("Type de features:", type(features_batch))
+    print("Taille de features:", features_batch.shape)
+    print("Matrice de features:\n", features_batch.numpy())
+    
+    print("Type de labels:", type(labels_batch))
+    print("Taille de labels:", labels_batch.shape)
+    print("Matrice de labels:\n", labels_batch.numpy())
+
+# Imprimer les informations pour test_data
+for features_batch, labels_batch in test_data.take(1):  # On prend seulement le premier batch
+    print("\nTest Data:")
+    print("Type de features:", type(features_batch))
+    print("Taille de features:", features_batch.shape)
+    print("Matrice de features:\n", features_batch.numpy())
+    
+    print("Type de labels:", type(labels_batch))
+    print("Taille de labels:", labels_batch.shape)
+    print("Matrice de labels:\n", labels_batch.numpy())

@@ -64,22 +64,22 @@ a_train_derivative = np.diff(a_train_100Hz, axis=0)
 a_test_derivative = np.diff(a_test_100Hz, axis=0)
 
 # Concaténation des caractéristiques
-def prepare_features(X, z, a_100Hz, a_derivative):
+def prepare_features(X, a_100Hz, a_derivative):
     # Troncature pour s'assurer que toutes les séries ont la même longueur
-    min_length = min(len(X), len(z), len(a_100Hz), len(a_derivative))
-    X, z, a_100Hz, a_derivative = X[:min_length], z[:min_length], a_100Hz[:min_length], a_derivative[:min_length]
+    min_length = min(len(X), len(a_100Hz), len(a_derivative))
+    X, a_100Hz, a_derivative = X[:min_length], a_100Hz[:min_length], a_derivative[:min_length]
 
     # Calcul des dérivées de la force
     X_derivative = np.diff(X, axis=0)
     X = X[:-1]  # Troncature pour correspondre aux dérivées
-    z, a_100Hz, a_derivative = z[:-1], a_100Hz[:-1], a_derivative[:-1]
+    a_100Hz, a_derivative = a_100Hz[:-1], a_derivative[:-1]
 
     # Combinaison des caractéristiques
-    features = np.hstack((X, z.reshape(-1, 1), X_derivative, a_100Hz.reshape(-1, 1), a_derivative.reshape(-1, 1)))
+    features = np.hstack((X, X_derivative, a_100Hz.reshape(-1, 1), a_derivative.reshape(-1, 1)))
     return features
 
-X_combined_train = prepare_features(X_train, z_train, a_train_100Hz, a_train_derivative)
-X_combined_test = prepare_features(X_test, z_test, a_test_100Hz, a_test_derivative)
+X_combined_train = prepare_features(X_train, a_train_100Hz, a_train_derivative)
+X_combined_test = prepare_features(X_test, a_test_100Hz, a_test_derivative)
 
 # Standardisation des caractéristiques
 scaler = StandardScaler()
@@ -103,7 +103,7 @@ def create_sequences(data, labels, seq_length):
         label_sequences.append(labels[i + seq_length - 1])
     return np.array(sequences), np.array(label_sequences)
 
-seq_length = 15
+seq_length = 130
 X_seq_train, y_seq_train = create_sequences(X_combined_scaled_train, y_train, seq_length)
 X_seq_test, y_seq_test = create_sequences(X_combined_scaled_test, y_test, seq_length)
 
@@ -127,16 +127,20 @@ early_stopping = EarlyStopping(monitor='loss', patience=10, restore_best_weights
 # Ajustement du modèle avec plus d'epochs et le callback d'early stopping
 model.fit(
     X_seq_train, y_seq_train, 
-    epochs=25,  # Augmentation du nombre d'epochs
+    epochs=10,  # Augmentation du nombre d'epochs
     batch_size=32,
     callbacks=[early_stopping]  # Ajout de l'early stopping
 )
 
 # Entraînement du modèle avec validation croisée
-model.fit(X_seq_train, y_seq_train, epochs=25, batch_size=32, validation_split=0.2, callbacks=[early_stopping], verbose=1)
+model.fit(X_seq_train, y_seq_train, epochs=10, batch_size=32, validation_split=0.2, callbacks=[early_stopping], verbose=1)
 
 # Prédictions
 y_pred = model.predict(X_seq_test).flatten()
+
+# Calculer le temps d'exécution
+elapsed_time = time.time() - start_time
+print(f"Temps d'exécution: {elapsed_time:.2f} secondes")
 
 # Calcul des erreurs
 mse = mean_squared_error(y_seq_test, y_pred)
@@ -154,6 +158,11 @@ plt.title("Comparaison gait progress")
 plt.legend()
 plt.show()
 
-# Calculer le temps d'exécution
-elapsed_time = time.time() - start_time
-print(f"Temps d'exécution: {elapsed_time:.2f} secondes")
+# Scatter plot pour l'analyse des erreurs de prédiction
+plt.figure()
+plt.scatter(y_seq_test, y_pred, alpha=0.5)
+plt.xlabel("Vrai Gait Progress")
+plt.ylabel("Prédiction")
+plt.title("Vrai vs Prédiction Gait Progress")
+plt.grid(True)
+plt.show()

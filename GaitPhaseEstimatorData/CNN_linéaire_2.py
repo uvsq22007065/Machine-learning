@@ -41,7 +41,6 @@ vGRF_derivative_test = calculate_derivatives(force_data_test)
 
 # Préparation des caractéristiques d'entrée et des cibles pour l'entraînement
 X_train = np.column_stack([
-    gait_progress_derivative_train,
     ankle_angle_derivative_train,
     vGRF_derivative_train,
     ankle_angles_filt_train,
@@ -51,7 +50,6 @@ y_train = gait_vector_train
 
 # Préparation des caractéristiques d'entrée et des cibles pour le test
 X_test = np.column_stack([
-    gait_progress_derivative_test,
     ankle_angle_derivative_test,
     vGRF_derivative_test,
     ankle_angles_filt_test,
