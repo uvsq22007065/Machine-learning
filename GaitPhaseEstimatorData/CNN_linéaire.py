@@ -21,14 +21,18 @@ test_file_path = "test_labels.csv"
 
 # Lire les fichiers CSV
 force_data_train = pd.read_csv(train_file_path)['Force'].values
+force_Derivative_data_train = pd.read_csv(train_file_path)['Force_Derivative'].values
 gait_vector_train = pd.read_csv(train_file_path)['Gait_Progress'].values
 gait_phases_train = pd.read_csv(train_file_path)['Phase'].values
 ankle_angles_filt_train = pd.read_csv(train_file_path)['Angle'].values
+ankle_Derivative_angles_filt_train = pd.read_csv(train_file_path)['Angle_Derivative'].values
 
 force_data_test = pd.read_csv(test_file_path)['Force'].values
+force_Derivative_data_test = pd.read_csv(test_file_path)['Force_Derivative'].values
 gait_vector_test = pd.read_csv(test_file_path)['Gait_Progress'].values
 gait_phases_test = pd.read_csv(test_file_path)['Phase'].values
 ankle_angles_filt_test = pd.read_csv(test_file_path)['Angle'].values
+ankle_Derivative_angles_filt_test = pd.read_csv(test_file_path)['Angle_Derivative'].values
 
 # Vous pouvez maintenant utiliser ces variables dans votre code
 print("Données d'entraînement et de test chargées avec succès.")
@@ -36,40 +40,26 @@ print("Données d'entraînement et de test chargées avec succès.")
 # Conversion des données en tableaux numpy
 X_train = np.array(force_data_train).reshape(-1, 1)
 y_train = np.array(gait_vector_train).flatten()
-z_train = np.array(gait_phases_train).flatten()
+X_train_Derivative = np.array(force_Derivative_data_train).flatten()
 a_train = np.array(ankle_angles_filt_train).flatten()
+a_train_Derivative = np.array(ankle_Derivative_angles_filt_train).flatten()
 
 X_test = np.array(force_data_test).reshape(-1, 1)
 y_test = np.array(gait_vector_test).flatten()
-z_test = np.array(gait_phases_test).flatten()
+X_test_Derivative = np.array(force_Derivative_data_test).flatten()
 a_test = np.array(ankle_angles_filt_test).flatten()
-
-# Encodage des phases de marche
-label_encoder = LabelEncoder()
-z_train = label_encoder.fit_transform(z_train)
-z_test = label_encoder.transform(z_test)
-
-# Calcul des dérivées
-a_train_derivative = np.diff(a_train, axis=0)
-a_test_derivative = np.diff(a_test, axis=0)
+a_test_Derivative = np.array(ankle_Derivative_angles_filt_test).flatten()
 
 # Concaténation des caractéristiques
-def prepare_features(X, a, a_derivative):
-    # Troncature pour s'assurer que toutes les séries ont la même longueur
-    min_length = min(len(X), len(a), len(a_derivative))
-    X, a, a_derivative = X[:min_length], a[:min_length], a_derivative[:min_length]
-
-    # Calcul des dérivées de la force
-    X_derivative = np.diff(X, axis=0)
-    X = X[:-1]  # Troncature pour correspondre aux dérivées
-    a, a_derivative = a[:-1], a_derivative[:-1]
-
-    # Combinaison des caractéristiques
-    features = np.hstack((X, X_derivative, a.reshape(-1, 1), a_derivative.reshape(-1, 1)))
+def prepare_features(X, X_Derivative, a, a_derivative):
+    features = np.hstack((X.reshape(-1, 1), 
+                          X_Derivative.reshape(-1, 1), 
+                          a.reshape(-1, 1), 
+                          a_derivative.reshape(-1, 1)))
     return features
 
-X_combined_train = prepare_features(X_train, a_train, a_train_derivative)
-X_combined_test = prepare_features(X_test, a_test, a_test_derivative)
+X_combined_train = prepare_features(X_train, X_train_Derivative, a_train, a_train_Derivative)
+X_combined_test = prepare_features(X_test, X_test_Derivative, a_test, a_test_Derivative)
 
 # Standardisation des caractéristiques
 scaler = StandardScaler()
