@@ -304,14 +304,22 @@ class GaitPhaseEstimator:
             # Add the current input to the deque, which maintains the last 10 timesteps
             self.data_sequence.append(current_input)
 
-            if len(self.data_sequence) == self.samples_size:
-                # Convert deque to numpy array and reshape for model input
-                x_combined_data = np.array(self.data_sequence).reshape(1, self.samples_size, 4)
+            # Mémoire tampon pour prédictions en temps réel
+            buffer = []
+            y_pred_real_time = []
+            len_buffer = self.seq_length
 
-                # Perform prediction
-                estimated_phase = self.model.predict(x_combined_data, verbose=0).flatten()
-                self.gait_ptg_pub.publish(int(estimated_phase))
-                #self.data_sequence = []
+            X_test_combined = self.prepare_features(self.ground_force, self.ground_force_derivative, self.ankle_angle, self.ankle_angle_derivative)
+            X_test_scaled = self.scaler.transform(X_test_combined)
+
+
+            for i in range(len(X_test_scaled)):
+                buffer.append(X_test_scaled[i])
+                if len(buffer) == len_buffer:
+                    buffer_array = np.array(buffer).reshape(1, len_buffer, -1)
+                    pred = self.model.predict(buffer_array).flatten()[0]
+                    y_pred_real_time.append(pred)
+                    buffer.pop(0)  # Déplace la fenêtre en supprimant le plus ancien élément
             
             # Final Estimation code
             self.angleUpdated = False
