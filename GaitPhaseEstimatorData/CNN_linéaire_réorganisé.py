@@ -86,18 +86,19 @@ y_test = gait_vector_test.flatten()
 # Mémoire tampon pour prédictions en temps réel
 buffer = []
 y_pred_real_time = []
+buf_length = 130
 
 for i in range(len(X_test_scaled)):
     buffer.append(X_test_scaled[i])
-    if len(buffer) == 10:
-        buffer_array = np.array(buffer).reshape(1, seq_length, -1)
+    if len(buffer) == buf_length:
+        buffer_array = np.array(buffer).reshape(1, buf_length, -1)
         pred = model.predict(buffer_array).flatten()[0]
         y_pred_real_time.append(pred)
         buffer.pop(0)  # Déplace la fenêtre en supprimant le plus ancien élément
 
 # Calcul des erreurs et affichage des résultats
-mse = mean_squared_error(y_test[seq_length-1:], y_pred_real_time)
-mae = mean_absolute_error(y_test[seq_length-1:], y_pred_real_time)
+mse = mean_squared_error(y_test[buf_length-1:], y_pred_real_time)
+mae = mean_absolute_error(y_test[buf_length-1:], y_pred_real_time)
 print(f"Mean Squared Error: {mse:.2f}")
 print(f"Mean Absolute Error: {mae:.2f}")
 elapsed_time = time.time() - start_time
@@ -105,7 +106,7 @@ print(f"Temps d'exécution: {elapsed_time:.2f} secondes")
 
 # Graphique de comparaison
 plt.figure()
-plt.plot(y_test[seq_length-1:], label="True gait progress")
+plt.plot(y_test[buf_length-1:], label="True gait progress")
 plt.plot(y_pred_real_time, label="Real-time Prediction")
 plt.xlabel("Samples")
 plt.ylabel("Progression (%)")

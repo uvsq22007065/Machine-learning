@@ -118,6 +118,7 @@ model.fit(X_seq_train, y_seq_train, epochs=10, batch_size=32, callbacks=[early_s
 # Prédictions
 y_pred = model.predict(X_seq_test).flatten()
 
+print(len(X_seq_test))
 # Calculer le temps d'exécution
 elapsed_time = time.time() - start_time
 print(f"Temps d'exécution: {elapsed_time:.2f} secondes")
