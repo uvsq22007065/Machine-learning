@@ -1,61 +1,38 @@
 import numpy as np
-from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 import matplotlib.pyplot as plt
-from scipy.interpolate import interp1d
-import tensorflow as tf
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Conv1D, MaxPooling1D, Dense, Flatten, LSTM
 from tensorflow.keras.callbacks import EarlyStopping
 from tensorflow.keras.optimizers import Adam
 import time
 import pandas as pd
-import os
 
 # Démarrer le chronomètre
 start_time = time.time()
 
-# Définir les chemins des fichiers CSV pour les données d'entraînement et de test
+# Chargement des données d'entraînement
 train_file_path = "C:/Users/Grégoire/OneDrive/Bureau/EPF/BRL/Machine learning/GaitPhaseEstimatorData/validation_labels.csv"
+data_train = pd.read_csv(train_file_path)
+force_data_train = data_train['Force'].values
+force_Derivative_data_train = data_train['Force_Derivative'].values
+gait_vector_train = data_train['Gait_Progress'].values
+ankle_angles_filt_train = data_train['Angle'].values
+ankle_Derivative_angles_filt_train = data_train['Angle_Derivative'].values
 
-# Lire les fichiers CSV
-force_data_train = pd.read_csv(train_file_path)['Force'].values
-force_Derivative_data_train = pd.read_csv(train_file_path)['Force_Derivative'].values
-gait_vector_train = pd.read_csv(train_file_path)['Gait_Progress'].values
-gait_phases_train = pd.read_csv(train_file_path)['Phase'].values
-ankle_angles_filt_train = pd.read_csv(train_file_path)['Angle'].values
-ankle_Derivative_angles_filt_train = pd.read_csv(train_file_path)['Angle_Derivative'].values
-
-# Vous pouvez maintenant utiliser ces variables dans votre code
-print("Données d'entraînement et de test chargées avec succès.")
-
-# Conversion des données en tableaux numpy
-X_train = np.array(force_data_train).reshape(-1, 1)
-y_train = np.array(gait_vector_train).flatten()
-X_train_Derivative = np.array(force_Derivative_data_train).flatten()
-a_train = np.array(ankle_angles_filt_train).flatten()
-a_train_Derivative = np.array(ankle_Derivative_angles_filt_train).flatten()
-
-# Concaténation des caractéristiques
+# Préparation des caractéristiques et normalisation
 def prepare_features(X, X_Derivative, a, a_derivative):
-    features = np.hstack((X.reshape(-1, 1), 
-                          X_Derivative.reshape(-1, 1), 
-                          a.reshape(-1, 1), 
-                          a_derivative.reshape(-1, 1)))
-    return features
+    return np.hstack((X.reshape(-1, 1), X_Derivative.reshape(-1, 1), a.reshape(-1, 1), a_derivative.reshape(-1, 1)))
 
-X_combined_train = prepare_features(X_train, X_train_Derivative, a_train, a_train_Derivative)
+X_train_combined = prepare_features(force_data_train, force_Derivative_data_train, ankle_angles_filt_train, ankle_Derivative_angles_filt_train)
+y_train = gait_vector_train.flatten()
 
-# Standardisation des caractéristiques
 scaler = StandardScaler()
-X_combined_scaled_train = scaler.fit_transform(X_combined_train)
+X_train_scaled = scaler.fit_transform(X_train_combined)
 
-# Vérifier et égaliser les longueurs avant de créer des séquences
-min_length_train = min(len(X_combined_scaled_train), len(y_train))
-X_combined_scaled_train = X_combined_scaled_train[:min_length_train]
-y_train = y_train[:min_length_train]
-
-# Création des séquences pour le Conv1D et LSTM
+# Préparation des séquences
+seq_length = 130
 def create_sequences(data, labels, seq_length):
     sequences, label_sequences = [], []
     for i in range(len(data) - seq_length + 1):
@@ -63,8 +40,7 @@ def create_sequences(data, labels, seq_length):
         label_sequences.append(labels[i + seq_length - 1])
     return np.array(sequences), np.array(label_sequences)
 
-seq_length = 130
-X_seq_train, y_seq_train = create_sequences(X_combined_scaled_train, y_train, seq_length)
+X_seq_train, y_seq_train = create_sequences(X_train_scaled, y_train, seq_length)
 
 # Modèle CNN amélioré avec LSTM
 model = Sequential([
@@ -94,59 +70,45 @@ model.fit(
 # Entraînement du modèle avec validation croisée
 model.fit(X_seq_train, y_seq_train, epochs=10, batch_size=32, callbacks=[early_stopping], verbose=1)
 
+# Charger les données de test
 test_file_path = "C:/Users/Grégoire/OneDrive/Bureau/EPF/BRL/Machine learning/GaitPhaseEstimatorData/test_labels.csv"
+data_test = pd.read_csv(test_file_path)
+force_data_test = data_test['Force'].values
+force_Derivative_data_test = data_test['Force_Derivative'].values
+gait_vector_test = data_test['Gait_Progress'].values
+ankle_angles_filt_test = data_test['Angle'].values
+ankle_Derivative_angles_filt_test = data_test['Angle_Derivative'].values
 
-force_data_test = pd.read_csv(test_file_path)['Force'].values
-force_Derivative_data_test = pd.read_csv(test_file_path)['Force_Derivative'].values
-gait_vector_test = pd.read_csv(test_file_path)['Gait_Progress'].values
-gait_phases_test = pd.read_csv(test_file_path)['Phase'].values
-ankle_angles_filt_test = pd.read_csv(test_file_path)['Angle'].values
-ankle_Derivative_angles_filt_test = pd.read_csv(test_file_path)['Angle_Derivative'].values
+X_test_combined = prepare_features(force_data_test, force_Derivative_data_test, ankle_angles_filt_test, ankle_Derivative_angles_filt_test)
+X_test_scaled = scaler.transform(X_test_combined)
+y_test = gait_vector_test.flatten()
 
-X_test = np.array(force_data_test).reshape(-1, 1)
-y_test = np.array(gait_vector_test).flatten()
-X_test_Derivative = np.array(force_Derivative_data_test).flatten()
-a_test = np.array(ankle_angles_filt_test).flatten()
-a_test_Derivative = np.array(ankle_Derivative_angles_filt_test).flatten()
+# Mémoire tampon pour prédictions en temps réel
+buffer = []
+y_pred_real_time = []
 
-X_combined_test = prepare_features(X_test, X_test_Derivative, a_test, a_test_Derivative)
+for i in range(len(X_test_scaled)):
+    buffer.append(X_test_scaled[i])
+    if len(buffer) == 10:
+        buffer_array = np.array(buffer).reshape(1, seq_length, -1)
+        pred = model.predict(buffer_array).flatten()[0]
+        y_pred_real_time.append(pred)
+        buffer.pop(0)  # Déplace la fenêtre en supprimant le plus ancien élément
 
-X_combined_scaled_test = scaler.transform(X_combined_test)
-
-min_length_test = min(len(X_combined_scaled_test), len(y_test))
-X_combined_scaled_test = X_combined_scaled_test[-min_length_test:]
-y_test = y_test[-min_length_test:]
-
-X_seq_test, y_seq_test = create_sequences(X_combined_scaled_test, y_test, seq_length)
-
-# Prédictions
-y_pred = model.predict(X_seq_test).flatten()
-
-# Calculer le temps d'exécution
+# Calcul des erreurs et affichage des résultats
+mse = mean_squared_error(y_test[seq_length-1:], y_pred_real_time)
+mae = mean_absolute_error(y_test[seq_length-1:], y_pred_real_time)
+print(f"Mean Squared Error: {mse:.2f}")
+print(f"Mean Absolute Error: {mae:.2f}")
 elapsed_time = time.time() - start_time
 print(f"Temps d'exécution: {elapsed_time:.2f} secondes")
 
-# Calcul des erreurs
-mse = mean_squared_error(y_seq_test, y_pred)
-mae = mean_absolute_error(y_seq_test, y_pred)
-print(f"Mean Squared Error: {mse:.2f}")
-print(f"Mean Absolute Error: {mae:.2f}")
-
-# Tracé de la progression réelle vs prédite
+# Graphique de comparaison
 plt.figure()
-plt.plot(y_seq_test, label="True gait progress")
-plt.plot(y_pred, label="Prediction")
+plt.plot(y_test[seq_length-1:], label="True gait progress")
+plt.plot(y_pred_real_time, label="Real-time Prediction")
 plt.xlabel("Samples")
 plt.ylabel("Progression (%)")
 plt.title("Comparaison gait progress")
 plt.legend()
-plt.show()
-
-# Scatter plot pour l'analyse des erreurs de prédiction
-plt.figure()
-plt.scatter(y_seq_test, y_pred, alpha=0.5)
-plt.xlabel("Vrai Gait Progress")
-plt.ylabel("Prédiction")
-plt.title("Vrai vs Prédiction Gait Progress")
-plt.grid(True)
 plt.show()
