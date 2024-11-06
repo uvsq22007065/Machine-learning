@@ -13,7 +13,7 @@ import pandas as pd
 start_time = time.time()
 
 # Chargement des données d'entraînement
-train_file_path = "C:/Users/Grégoire/OneDrive/Bureau/EPF/BRL/Machine learning/GaitPhaseEstimatorData/validation_labels.csv"
+train_file_path = "C:/Users/Grégoire/OneDrive/Bureau/EPF/BRL/Machine learning/GaitPhaseEstimatorData/test_labels.csv"
 data_train = pd.read_csv(train_file_path)
 force_data_train = data_train['Force'].values
 force_Derivative_data_train = data_train['Force_Derivative'].values
@@ -71,7 +71,7 @@ model.fit(
 model.fit(X_seq_train, y_seq_train, epochs=10, batch_size=32, callbacks=[early_stopping], verbose=1)
 
 # Charger les données de test
-test_file_path = "C:/Users/Grégoire/OneDrive/Bureau/EPF/BRL/Machine learning/GaitPhaseEstimatorData/test_labels.csv"
+test_file_path = "C:/Users/Grégoire/OneDrive/Bureau/EPF/BRL/Machine learning/GaitPhaseEstimatorData/validation_labels.csv"
 data_test = pd.read_csv(test_file_path)
 force_data_test = data_test['Force'].values
 force_Derivative_data_test = data_test['Force_Derivative'].values
@@ -88,13 +88,29 @@ buffer = []
 y_pred_real_time = []
 buf_length = 130
 
+from collections import deque
+
+# Mémoire tampon optimisée
+buffer = deque(maxlen=buf_length)
+y_pred_real_time = []
+
+start_time2 = time.perf_counter()
+
 for i in range(len(X_test_scaled)):
     buffer.append(X_test_scaled[i])
     if len(buffer) == buf_length:
-        buffer_array = np.array(buffer).reshape(1, buf_length, -1)
-        pred = model.predict(buffer_array).flatten()[0]
+        buffer_array = np.expand_dims(np.array(buffer), axis=0)
+        pred = model.predict(buffer_array, verbose=0).flatten()[0]
         y_pred_real_time.append(pred)
-        buffer.pop(0)  # Déplace la fenêtre en supprimant le plus ancien élément
+
+end_time = time.perf_counter()
+
+# Calculer le temps total et le temps moyen par itération
+total_time = end_time - start_time2
+average_time_per_iteration = total_time / len(X_test_scaled)
+
+print(f"Temps total: {total_time:.4f} secondes")
+print(f"Temps moyen par itération: {average_time_per_iteration:.4f} secondes")
 
 # Calcul des erreurs et affichage des résultats
 mse = mean_squared_error(y_test[buf_length-1:], y_pred_real_time)

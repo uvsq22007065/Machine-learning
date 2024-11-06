@@ -16,8 +16,8 @@ import os
 start_time = time.time()
 
 # Définir les chemins des fichiers CSV pour les données d'entraînement et de test
-train_file_path = "C:/Users/Grégoire/OneDrive/Bureau/EPF/BRL/Machine learning/GaitPhaseEstimatorData/validation_labels.csv"
-test_file_path = "C:/Users/Grégoire/OneDrive/Bureau/EPF/BRL/Machine learning/GaitPhaseEstimatorData/test_labels.csv"
+train_file_path = "C:/Users/Grégoire/OneDrive/Bureau/EPF/BRL/Machine learning/GaitPhaseEstimatorData/test_labels.csv"
+test_file_path = "C:/Users/Grégoire/OneDrive/Bureau/EPF/BRL/Machine learning/GaitPhaseEstimatorData/validation_labels.csv"
 
 # Lire les fichiers CSV
 force_data_train = pd.read_csv(train_file_path)['Force'].values
@@ -83,7 +83,7 @@ def create_sequences(data, labels, seq_length):
         label_sequences.append(labels[i + seq_length - 1])
     return np.array(sequences), np.array(label_sequences)
 
-seq_length = 130
+seq_length = 135
 X_seq_train, y_seq_train = create_sequences(X_combined_scaled_train, y_train, seq_length)
 X_seq_test, y_seq_test = create_sequences(X_combined_scaled_test, y_test, seq_length)
 
@@ -114,6 +114,13 @@ model.fit(
 
 # Entraînement du modèle avec validation croisée
 model.fit(X_seq_train, y_seq_train, epochs=10, batch_size=32, callbacks=[early_stopping], verbose=1)
+
+print("force_data_train shape:", force_data_train.shape)
+print("force_Derivative_data_train shape:", force_Derivative_data_train.shape)
+print("ankle_angles_filt_train shape:", ankle_angles_filt_train.shape)
+print("ankle_Derivative_angles_filt_train shape:", ankle_Derivative_angles_filt_train.shape)
+print("X_train_combined shape:", X_combined_train.shape)
+print("X_combined_scaled_train shape:", X_combined_scaled_train.shape)
 
 # Prédictions
 y_pred = model.predict(X_seq_test).flatten()
