@@ -83,7 +83,7 @@ def create_sequences(data, labels, seq_length):
         label_sequences.append(labels[i + seq_length - 1])
     return np.array(sequences), np.array(label_sequences)
 
-seq_length = 135
+seq_length = 130
 X_seq_train, y_seq_train = create_sequences(X_combined_scaled_train, y_train, seq_length)
 X_seq_test, y_seq_test = create_sequences(X_combined_scaled_test, y_test, seq_length)
 
