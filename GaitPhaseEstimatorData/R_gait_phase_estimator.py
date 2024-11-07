@@ -290,23 +290,26 @@ class GaitPhaseEstimator:
             # Add the current input to the deque, which maintains the last N timesteps
             self.data_sequence.append(current_input)
             
-            self.current_phase = 0
+            self.current_phase = [0]
+            estimated_phase = [0]
             
             if len(self.data_sequence) == self.samples_size:
                 # Convert deque to numpy array and reshape for model input
                 X = np.array(self.data_sequence)
 
                 # Perform prediction
-                estimated_phase = self.model.predict(X)
+                estimated_phase_values = self.model.predict(X)
 
                 # Check if the estimated phase is lower than the current phase; if so, keep the current value
-                if estimated_phase < self.current_phase:
-                    estimated_phase = self.current_phase
+                if estimated_phase[-1] < self.current_phase[-1]:
+                    estimated_phase_values = self.current_phase[-1]
+                
+                estimated_phase = self.current_phase.append(estimated_phase_values)
 
                 # Update current phase with the adjusted estimated phase
-                self.current_phase = estimated_phase
+                self.current_phase = self.current_phase.append(estimated_phase_values)
 
-                self.smoothed_estimated_phase = self.mean_filter(estimated_phase, self.samples_size)[-1]
+                self.smoothed_estimated_phase = self.mean_filter(estimated_phase_values, self.samples_size)[-1]
 
                 self.gait_ptg_pub.publish(int(self.smoothed_estimated_phase))
 
