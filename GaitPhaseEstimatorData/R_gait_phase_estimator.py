@@ -51,6 +51,7 @@ class GaitPhaseEstimator:
         self.gait_ptg_pub = rospy.Publisher('/gait_percentage_R', Int16, queue_size=2)
         self.force_dt_pub = rospy.Publisher('/ground_force_derivative', Float64, queue_size=2)
         self.angle_dt_pub = rospy.Publisher('/angle_force_derivative', Float64, queue_size=2)
+        self.current_phase = []
 
 
     def ankle_angle_callback(self, msg):
@@ -273,50 +274,54 @@ class GaitPhaseEstimator:
             rospy.logerr("Model was not loaded, please verify")
             self.modelLoaded = False
             return 0
-    
-    def mean_filter(self, predictions, window_size):
-        return np.convolve(predictions, np.ones(window_size)/window_size, mode='same')
 
+    def mean_filter(self, predictions, window_size):
+        predictions = np.array([float(x) for x in predictions if isinstance(x, (int, float))])
+        return np.convolve(predictions, np.ones(window_size) / window_size, mode='same')
 
     def estimate_phase(self):
+        # Vérifiez que le modèle est chargé et que les valeurs d'angle et de force sont mises à jour
         if (self.modelLoaded is not None) and (self.angleUpdated == True) and (self.forceUpdated == True):
-            # Estimation code
+            # Prépare l'entrée actuelle
             current_input = [self.ground_force, self.ground_force_derivative, self.ankle_angle, self.ankle_angle_derivative]
-
-            # FOR TEST
+    
+            # Prédis une phase pour l'entrée actuelle
+            new_phase = [float(self.model.predict([current_input])[0])]
+            self.current_phase.append(new_phase)
+    
+            # Publie les valeurs de test
             self.angle_dt_pub.publish(self.ankle_angle_derivative)
             self.force_dt_pub.publish(self.ground_force_derivative)
 
-            # Add the current input to the deque, which maintains the last N timesteps
+            # Ajoute l'entrée à la séquence de données
             self.data_sequence.append(current_input)
-            
-            self.current_phase = [0]
-            estimated_phase = [0]
-            
+
+            # Si la séquence atteint la taille nécessaire pour l'échantillon, alors calculer les phases
             if len(self.data_sequence) == self.samples_size:
-                # Convert deque to numpy array and reshape for model input
                 X = np.array(self.data_sequence)
+                estimated_phase_values = self.model.predict(X).flatten()
+                modified_phase = float(estimated_phase_values[-1])  # Assurez-vous que c'est un scalaire
+        
+                # Ajoute la phase modifiée à current_phase
+                self.current_phase.append(modified_phase)
+        
+                # Trouver la valeur maximale dans `current_phase` avant l'ajout de la nouvelle valeur
+                previous_one = self.current_phase[-2]  # Exclut le dernier élément pour comparer
 
-                # Perform prediction
-                estimated_phase_values = self.model.predict(X)
+                # Comparer le dernier élément avec la valeur maximale
+                if self.current_phase[-1] < previous_one[-1]:
+                    self.current_phase[-1] = previous_one[-1]  # Remplace la dernière valeur pour garantir la croissance
 
-                # Check if the estimated phase is lower than the current phase; if so, keep the current value
-                if estimated_phase[-1] < self.current_phase[-1]:
-                    estimated_phase_values = self.current_phase[-1]
-                
-                estimated_phase = self.current_phase.append(estimated_phase_values)
+                # Affiche la liste des phases stabilisées
+                print(self.current_phase)
 
-                # Update current phase with the adjusted estimated phase
-                self.current_phase = self.current_phase.append(estimated_phase_values)
-
-                self.smoothed_estimated_phase = self.mean_filter(estimated_phase_values, self.samples_size)[-1]
-
+                # Applique un filtre moyen pour lisser la phase estimée
+                self.smoothed_estimated_phase = self.mean_filter(self.current_phase, self.samples_size)[-1]
                 self.gait_ptg_pub.publish(int(self.smoothed_estimated_phase))
 
-            # Reset flags
+            # Réinitialise les indicateurs
             self.angleUpdated = False
             self.forceUpdated = False
-
 
     def run(self):
         rate = rospy.Rate(200)  # Set the frequency to 200 Hz
