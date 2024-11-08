@@ -51,6 +51,7 @@ class GaitPhaseEstimator:
         self.gait_ptg_pub = rospy.Publisher('/gait_percentage_LSTM', Int16, queue_size=2)
         self.force_dt_pub = rospy.Publisher('/ground_force_derivative', Float64, queue_size=2)
         self.angle_dt_pub = rospy.Publisher('/angle_force_derivative', Float64, queue_size=2)
+        self.phase_pub = rospy.Publisher('/stance_swing_phase_LSTM', Int16, queue_size=2)  # New publisher for stance/swing phase
 
 
     def ankle_angle_callback(self, msg):
@@ -289,6 +290,11 @@ class GaitPhaseEstimator:
     
                 # Publish the adjusted phase
                 self.gait_ptg_pub.publish(int(self.current_phase))
+
+                phase_indicator = Int16()
+                phase_indicator.data = 100 if self.ground_force == 0 else 0
+                self.phase_pub.publish(phase_indicator)
+
 
             # Reset flags
             self.angleUpdated = False
