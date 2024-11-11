@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import statistics
 import rospy, rospkg, rosbag
 from std_msgs.msg import Float64, Int16
 import os
@@ -228,7 +229,7 @@ class GaitPhaseEstimator:
     def estimate_phase(self):
         if (self.modelLoaded is not None) and (self.angleUpdated == True) and (self.forceUpdated == True):
             current_input = [self.ground_force, self.ground_force_derivative, self.ankle_angle, self.ankle_angle_derivative]
-            new_phase = [float(self.model.predict([current_input])[0])]
+            new_phase = float(self.model.predict([current_input])[0])
             self.current_phase.append(new_phase)
 
             self.angle_dt_pub.publish(self.ankle_angle_derivative)
@@ -242,9 +243,21 @@ class GaitPhaseEstimator:
                 modified_phase = float(estimated_phase_values[-1])
 
                 self.current_phase.append(modified_phase)
-                previous_one = self.current_phase[-2]
-                if self.current_phase[-1] < previous_one[-1]:
-                    self.current_phase[-1] = previous_one[-1]
+
+                # Take only the last 5 values
+                if len(self.current_phase) > 10:
+                    self.current_phase = self.current_phase[-10:]
+
+                # Compare the last two values and keep the larger one
+                if len(self.current_phase) == 10:
+                    if self.current_phase[-5] - self.current_phase[-1] > 50:
+                        self.current_phase[-1] = 0
+                        self.current_phase = self.current_phase[-1:]
+                    else:
+                        if self.current_phase[-1] - self.current_phase[-2] < 0:
+                            self.current_phase[-1] = self.current_phase[-2]
+                        else:
+                            self.current_phase[-1] = statistics.mean(self.current_phase)
 
                 print(self.current_phase)
 
