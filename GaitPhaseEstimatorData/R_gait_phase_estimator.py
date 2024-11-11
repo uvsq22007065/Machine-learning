@@ -254,12 +254,20 @@ class GaitPhaseEstimator:
                         self.current_phase[-1] = 0
                         self.current_phase = self.current_phase[-1:]
                     else:
-                        if self.current_phase[-1] - self.current_phase[-2] < 0:
+                        if self.current_phase[-2] - self.current_phase[-1] > 0:
                             self.current_phase[-1] = self.current_phase[-2]
+                            self.current_phase[-1] = statistics.mean(self.current_phase)
+                        elif self.current_phase[-1] - self.current_phase[-2] > 2 * (self.current_phase[-2] - self.current_phase[-3]):
+                            self.current_phase[-1] = self.current_phase[-2]
+                            self.current_phase[-1] = statistics.mean(self.current_phase)                            
                         else:
                             self.current_phase[-1] = statistics.mean(self.current_phase)
-
-                print(self.current_phase)
+                elif len(self.current_phase) > 2:
+                    if self.current_phase[-2] - self.current_phase[-1] > 0:
+                        self.current_phase[-1] = self.current_phase[-2]
+                        self.current_phase[-1] = statistics.mean(self.current_phase)
+                    else:
+                        self.current_phase[-1] = statistics.mean(self.current_phase)
 
                 self.smoothed_estimated_phase = self.mean_filter(self.current_phase, self.samples_size)[-1]
                 self.gait_ptg_pub.publish(int(self.smoothed_estimated_phase))
