@@ -1,4 +1,3 @@
-Comment rendre la phase de train plus rapide ?
 #!/usr/bin/env python3
 
 import statistics
