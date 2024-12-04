@@ -1,4 +1,3 @@
-J'avais cette version. Elle est exactement comme ce que je voulais, à part pour le début de chaque cycle, pour le reste, il faut qu'on ait des cycles qui varient de 0 à 100 et quand on reçoit une chute importante, on relance un nouveau cycle (c'est pour ça que le "anomaly_threshold" existe). Le code en question :
 #!/usr/bin/env python3
 
 import statistics
