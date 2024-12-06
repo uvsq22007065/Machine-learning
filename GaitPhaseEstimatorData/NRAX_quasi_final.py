@@ -29,7 +29,7 @@ class GaitPhaseEstimator:
         package_path = rospack.get_path('ankle_exoskeleton')
 
         self.labels_path = os.path.join(package_path, "log", "learning_models", f"{self.patient}_labels.csv")
-        self.model_path = os.path.join(package_path, "log", "learning_models", f"{self.patient}_modelNRAX.keras")
+        self.model_path = os.path.join(package_path, "log", "learning_models", f"{self.patient}_modelNRAX.pkl")
         self.bag_path = os.path.join(package_path, "log", "training_bags", f"{self.patient}.bag")
 
         # Variables to track state
