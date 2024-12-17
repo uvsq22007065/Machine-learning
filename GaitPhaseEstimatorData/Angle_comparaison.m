@@ -1,12 +1,12 @@
 %% Charger les rosbags
 bag1 = rosbag('C:\Program Files\Data_bags\daniel_validation1d5kmph.bag'); % Modifier le chemin si nécessaire
-bag2 = rosbag('C:\Program Files\Data_bags\walking_exoskeleton_force_control.bag'); % Modifier avec le chemin du 2e bag
+bag2 = rosbag('C:\Program Files\Data_bags\10Nand1D5KMPH.bag'); % Modifier avec le chemin du 2e bag
 bag3 = rosbag('C:\Program Files\Data_bags\daniel_validation1kmph.bag'); % Modifier le chemin si nécessaire
 
 %% Extraction des données du topic /ankle
-ankle_topic1 = select(bag1, 'Topic', '/insole_data');
-ankle_topic2 = select(bag2, 'Topic', '/insole_data');
-ankle_topic3 = select(bag3, 'Topic', '/insole_data');
+ankle_topic1 = select(bag1, 'Topic', '/vGRF');
+ankle_topic2 = select(bag2, 'Topic', '/vGRF');
+ankle_topic3 = select(bag3, 'Topic', '/vGRF');
 
 ankle_msgs1 = readMessages(ankle_topic1, 'DataFormat', 'struct');
 ankle_msgs2 = readMessages(ankle_topic2, 'DataFormat', 'struct');
@@ -53,11 +53,11 @@ figure;
 
 % Plot des deux séries de données
 subplot(2, 1, 1);
-% plot(time_stamps, ankle_data1, 'b', 'DisplayName', 'Ankle without exo 1.5 kmph');
-% hold on;
-plot(time_stamps, ankle_data2, 'r', 'DisplayName', 'Ankle with exo');
+plot(time_stamps, ankle_data1, 'b', 'DisplayName', 'Ankle without exo 1.5 kmph');
 hold on;
-plot(time_stamps, ankle_data3, 'k', 'DisplayName', 'Ankle without exo 1 kmph');
+plot(time_stamps, ankle_data2, 'r', 'DisplayName', 'Ankle with exo');
+% hold on;
+% plot(time_stamps, ankle_data3, 'k', 'DisplayName', 'Ankle without exo 1 kmph');
 xlabel('Time (s)');
 ylabel('Ankle Data');
 title('Comparaison des données Ankle');
@@ -66,9 +66,9 @@ grid on;
 
 % Plot de la différence
 subplot(2, 1, 2);
-% plot(time_stamps, ankle_difference, 'k', 'DisplayName', 'Différence 1.5 kmph minus exo');
+plot(time_stamps, ankle_difference, 'k', 'DisplayName', 'Différence 1.5 kmph minus exo');
 % hold on;
-plot(time_stamps, ankle_difference2, 'b', 'DisplayName', 'Différence 1 kmph minus exo');
+% plot(time_stamps, ankle_difference2, 'b', 'DisplayName', 'Différence 1 kmph minus exo');
 xlabel('Time (s)');
 ylabel('Différence');
 title('Différence entre les deux jeux de données');
