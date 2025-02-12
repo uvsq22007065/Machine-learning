@@ -279,7 +279,7 @@ figure(4);
 plot(heel_force, 'b'); hold on;
 plot(mid_force, 'g'); 
 plot(toe_force, 'r'); 
-title('Phases de marche et progression dans chaque cycle');
+title('Walking phases and progression in each cycle');
 
 % Pour chaque cycle détecté, marquer les pourcentages (10%, 20%, ..., 100%)
 for c = 1:length(cycle_starts)-1
@@ -312,7 +312,7 @@ for c = 1:length(cycle_starts)-1
     end
 end
 
-xlabel('Index (temps)');
+xlabel('Time (s)');
 ylabel('Force (N)');
-legend('Force du talon', 'Force du médio-pied', 'Force des orteils');
+legend('Heel force', 'Midfoot force', 'Toe force');
 hold off;

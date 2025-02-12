@@ -4,9 +4,9 @@ bag2 = rosbag('C:\Program Files\Data_bags\10Nand1D5KMPH.bag'); % Modifier avec l
 bag3 = rosbag('C:\Program Files\Data_bags\daniel_validation1kmph.bag'); % Modifier le chemin si nécessaire
 
 %% Extraction des données du topic /ankle
-ankle_topic1 = select(bag1, 'Topic', '/vGRF');
-ankle_topic2 = select(bag2, 'Topic', '/vGRF');
-ankle_topic3 = select(bag3, 'Topic', '/vGRF');
+ankle_topic1 = select(bag1, 'Topic', '/ankle_joint/angle');
+ankle_topic2 = select(bag2, 'Topic', '/ankle_joint/angle');
+ankle_topic3 = select(bag3, 'Topic', '/ankle_joint/angle');
 
 ankle_msgs1 = readMessages(ankle_topic1, 'DataFormat', 'struct');
 ankle_msgs2 = readMessages(ankle_topic2, 'DataFormat', 'struct');

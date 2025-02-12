@@ -348,7 +348,7 @@ import numpy as np
 import os
 from matplotlib import cm
 
-def plot_correlation_bubble_3d_optimized(results, group_name, correlation_threshold=0.98):
+def plot_correlation_bubble_3d_optimized(results, group_name, correlation_threshold):
     """
     Plot an optimized 3D bubble chart with clearer visualization for nodes, links, and annotations.
     """
@@ -475,12 +475,12 @@ if __name__ == "__main__":
     left_results, right_results = process_all_subjects(data_dir)
     
     # Heatmap pour les fichiers left et right
-    # plot_correlation_heatmap(left_results, "Left files", correlation_threshold=0.99)
-    # plot_correlation_heatmap(right_results, "Right files", correlation_threshold=0.99)
+    plot_correlation_heatmap(left_results, "Left files", correlation_threshold=0.98)
+    plot_correlation_heatmap(right_results, "Right files", correlation_threshold=0.98)
     
     # Graphe pour les fichiers left et right
-    plot_correlation_graph(left_results, "Left files", correlation_threshold=0.1)
-    plot_correlation_graph(right_results, "Right files", correlation_threshold=0.1)
+    plot_correlation_graph(left_results, "Left files", correlation_threshold=0.98)
+    plot_correlation_graph(right_results, "Right files", correlation_threshold=0.98)
 
     # Graphe 3D pour les fichiers left et right
     # plot_correlation_bubble_3d(left_results, "Left files", correlation_threshold=0.99)

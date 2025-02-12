@@ -14,6 +14,7 @@ force_noise_calib = load("data_bags/" + filename_force_noise + ".mat");
 insole_points =  load("data_bags/" + filename_insole_points + ".mat");
 load("data_bags/" + filename + ".mat")
 
+
 healthy_angle = load("healthy_ankle_angle.txt");
 
 clear filename*
@@ -254,7 +255,7 @@ true_heel_force = zeros(size(heel_force));
 true_mid_force = zeros(size(heel_force));
 true_toe_force = zeros(size(heel_force));
 true_total_forces = zeros(size(heel_force));
-percent_progression = NaN(size(heel_force)); % Initialisation pour tous les points de progression
+percent_progression = zeros(size(heel_force)); % Initialisation avec des zéros
 
 % Calibrage
 known_force = 1;

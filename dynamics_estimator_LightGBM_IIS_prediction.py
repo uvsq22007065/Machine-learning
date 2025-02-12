@@ -122,3 +122,28 @@ plt.title("Confusion matrix")
 plt.ylabel('Real classes')
 plt.xlabel('Predicted classes')
 plt.show()
+
+# Importer les bibliothèques nécessaires
+import matplotlib.pyplot as plt
+import numpy as np
+
+# Tracer les dérivées des angles interpolés pour les données d'entraînement
+plt.figure(figsize=(12, 6))
+plt.plot(ankle_angles_filt_train_100Hz_derivative, label="Angle derivative", color='blue')
+plt.title("Derivatives of interpolated angles")
+plt.xlabel("Samples")
+plt.ylabel("Derivative")
+plt.legend()
+plt.grid()
+plt.show()
+
+# Tracer les dérivées des forces interpolées pour les données d'entraînement
+force_derivative_train = np.diff(force_data_train, axis=0).flatten()
+plt.figure(figsize=(12, 6))
+plt.plot(force_derivative_train, label="Derivative of forces", color='green')
+plt.title("Interpolated force derivatives")
+plt.xlabel("Samples")
+plt.ylabel("Derivative")
+plt.legend()
+plt.grid()
+plt.show()
