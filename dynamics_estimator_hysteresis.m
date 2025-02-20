@@ -1,5 +1,5 @@
 clear; clc; close all;
-addpath("data_bags/")
+addpath("GaitPhaseEstimatorData/Daniel/")
 
 %% Load Data
 filename = "healthy_walking_treadmill_2kmph";
