@@ -4,12 +4,12 @@ from sklearn.metrics import mean_squared_error, mean_absolute_error
 import matplotlib.pyplot as plt
 import pandas as pd
 import time
-import torch
-import torch.nn as nn
-from torch.utils.data import DataLoader, TensorDataset
+from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor, VotingRegressor
 
 # Démarrer le chronomètre
 start_time = time.time()
+# Chemins des fichiers
+import os
 # Chemins des fichiers
 import os
 import numpy as np
@@ -101,111 +101,58 @@ scaler = StandardScaler()
 features_train_scaled = scaler.fit_transform(features_train)
 features_test_scaled = scaler.transform(features_test)
 
+# Préparer les caractéristiques et les labels
+features_train = train_data.drop(columns=['Gait_Progress']).values
+labels_train = train_data['Gait_Progress'].values
+features_test = test_data.drop(columns=['Gait_Progress']).values
+labels_test = test_data['Gait_Progress'].values
+
+# Standardiser les données
+scaler = StandardScaler()
+features_train_scaled = scaler.fit_transform(features_train)
+features_test_scaled = scaler.transform(features_test)
+
 print("Préparation des données terminée avec succès.")
 
-# Création de séquences temporelles pour RNN
-def create_sequences(data, labels, seq_length):
-    sequences, label_sequences = [], []
-    for i in range(len(data) - seq_length + 1):
-        sequences.append(data[i:i + seq_length])
-        label_sequences.append(labels[i + seq_length - 1])
-    return np.array(sequences), np.array(label_sequences)
+# Définir les modèles
+model_gb = GradientBoostingRegressor(n_estimators=100, learning_rate=0.1, max_depth=3, random_state=42)
+model_rf = RandomForestRegressor(n_estimators=100, max_depth=3, random_state=42)
+voting_model = VotingRegressor([('gb', model_gb), ('rf', model_rf)])
 
-seq_length = 130
-X_seq_train, y_seq_train = create_sequences(features_train_scaled, labels_train, seq_length)
-X_seq_test, y_seq_test = create_sequences(features_test_scaled, labels_test, seq_length)
+# Entraîner les modèles
+model_gb.fit(features_train_scaled, labels_train)
+model_rf.fit(features_train_scaled, labels_train)
+voting_model.fit(features_train_scaled, labels_train)
 
-# Conversion en tenseurs PyTorch
-X_seq_train = torch.tensor(X_seq_train, dtype=torch.float)
-y_seq_train = torch.tensor(y_seq_train, dtype=torch.float)
-X_seq_test = torch.tensor(X_seq_test, dtype=torch.float)
-y_seq_test = torch.tensor(y_seq_test, dtype=torch.float)
+# Prédire les résultats
+labels_pred_gb = model_gb.predict(features_test_scaled)
+labels_pred_rf = model_rf.predict(features_test_scaled)
+labels_pred_voting = voting_model.predict(features_test_scaled)
 
-# Créer des DataLoaders
-batch_size = 32
-train_dataset = TensorDataset(X_seq_train, y_seq_train)
-test_dataset = TensorDataset(X_seq_test, y_seq_test)
-train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+# Calcul des erreurs pour chaque modèle
+mse_gb = mean_squared_error(labels_test, labels_pred_gb)
+mae_gb = mean_absolute_error(labels_test, labels_pred_gb)
+mse_rf = mean_squared_error(labels_test, labels_pred_rf)
+mae_rf = mean_absolute_error(labels_test, labels_pred_rf)
+mse_voting = mean_squared_error(labels_test, labels_pred_voting)
+mae_voting = mean_absolute_error(labels_test, labels_pred_voting)
 
-# Définir le modèle RNN
-class RNNModel(nn.Module):
-    def __init__(self, input_dim, hidden_dim, output_dim, num_layers):
-        super(RNNModel, self).__init__()
-        self.rnn = nn.RNN(input_dim, hidden_dim, num_layers, batch_first=True, nonlinearity='tanh')
-        self.fc = nn.Linear(hidden_dim, output_dim)
+print(f"Gradient Boosting - MSE: {mse_gb:.2f}, MAE: {mae_gb:.2f}")
+print(f"Random Forest - MSE: {mse_rf:.2f}, MAE: {mae_rf:.2f}")
+print(f"Voting Regressor - MSE: {mse_voting:.2f}, MAE: {mae_voting:.2f}")
 
-    def forward(self, x):
-        _, hn = self.rnn(x)  # hn contient les activations finales des couches cachées
-        hn = hn[-1]  # Dernière couche cachée
-        out = self.fc(hn)
-        return out
-
-# Initialiser le modèle
-input_dim = X_seq_train.size(2)
-hidden_dim = 64
-output_dim = 1
-num_layers = 2
-model = RNNModel(input_dim, hidden_dim, output_dim, num_layers)
-
-# Définir l'optimiseur et la fonction de perte
-optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-criterion = nn.MSELoss()
-
-# Sauvegarder le meilleur modèle
-best_model_path = "best_rnn_model.pth"
-best_loss = float('inf')
-
-# Entraîner le modèle
-epochs = 50
-for epoch in range(epochs):
-    model.train()
-    total_loss = 0
-    for X_batch, y_batch in train_loader:
-        optimizer.zero_grad()
-        predictions = model(X_batch).squeeze()
-        loss = criterion(predictions, y_batch)
-        loss.backward()
-        optimizer.step()
-        total_loss += loss.item()
-
-    avg_loss = total_loss / len(train_loader)
-    print(f"Epoch {epoch+1}/{epochs}, Loss: {avg_loss:.4f}")
-
-    # Sauvegarde si le modèle est meilleur
-    if avg_loss < best_loss:
-        best_loss = avg_loss
-        torch.save(model.state_dict(), best_model_path)
-        print(f"Meilleur modèle sauvegardé avec une perte de {best_loss:.4f}")
-
-# Évaluer le modèle
-model.eval()
-predictions = []
-true_values = []
-with torch.no_grad():
-    for X_batch, y_batch in test_loader:
-        preds = model(X_batch).squeeze()
-        predictions.append(preds)
-        true_values.append(y_batch)
-
-predictions = torch.cat(predictions).numpy()
-true_values = torch.cat(true_values).numpy()
-
-mse = mean_squared_error(true_values, predictions)
-mae = mean_absolute_error(true_values, predictions)
-print(f"Mean Squared Error: {mse:.4f}")
-print(f"Mean Absolute Error: {mae:.4f}")
-
-# Temps d'exécution
+# Calculer le temps d'exécution
 elapsed_time = time.time() - start_time
 print(f"Temps d'exécution: {elapsed_time:.2f} secondes")
 
-# Tracé des résultats
+# Tracer les résultats
 plt.figure()
-plt.plot(true_values, label="True")
-plt.plot(predictions, label="Predicted")
+plt.plot(labels_test, label="True gait progress", linestyle='--')
+plt.plot(labels_pred_gb, label="Gradient Boosting")
+plt.plot(labels_pred_rf, label="Random Forest")
+plt.plot(labels_pred_voting, label="Voting Regressor")
 plt.xlabel("Samples")
-plt.ylabel("Gait Progress")
-plt.title("True vs Predicted Gait Progress")
+plt.ylabel("Progress (%)")
+plt.title("Model Comparison")
 plt.legend()
 plt.show()

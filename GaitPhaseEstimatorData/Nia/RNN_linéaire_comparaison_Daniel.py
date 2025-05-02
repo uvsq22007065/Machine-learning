@@ -10,6 +10,7 @@ from torch.utils.data import DataLoader, TensorDataset
 
 # Démarrer le chronomètre
 start_time = time.time()
+
 # Chemins des fichiers
 import os
 import numpy as np
@@ -70,13 +71,14 @@ def load_and_prepare_data(folder_path):
 
 # Demander les chemins des dossiers d'entraînement et de test
 train_folder = input("Entrez le chemin du dossier contenant les données d'entraînement : ")
-test_folder = input("Entrez le chemin du dossier contenant les données de test : ")
 
 # Charger et préparer les données d'entraînement
 train_data = load_and_prepare_data(train_folder)
 
-# Charger et préparer les données de test
-test_data = load_and_prepare_data(test_folder)
+test_file_path = "C:/Users/Grégoire/OneDrive/Bureau/EPF/BRL/Machine learning/GaitPhaseEstimatorData/validation_labels.csv"
+test_data = pd.read_csv(test_file_path)
+features_test = test_data[['Force', 'Force_Derivative', 'Angle', 'Angle_Derivative']].values
+labels_test = test_data['Gait_Progress'].values
 
 # Vérifier que les données ont été chargées correctement
 if train_data is None or test_data is None:

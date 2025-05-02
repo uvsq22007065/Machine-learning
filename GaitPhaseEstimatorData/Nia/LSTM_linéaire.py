@@ -103,7 +103,7 @@ features_test_scaled = scaler.transform(features_test)
 
 print("Préparation des données terminée avec succès.")
 
-# Création de séquences temporelles pour RNN
+# Création de séquences temporelles pour LSTM
 def create_sequences(data, labels, seq_length):
     sequences, label_sequences = [], []
     for i in range(len(data) - seq_length + 1):
@@ -128,15 +128,15 @@ test_dataset = TensorDataset(X_seq_test, y_seq_test)
 train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 
-# Définir le modèle RNN
-class RNNModel(nn.Module):
+# Définir le modèle LSTM
+class LSTMModel(nn.Module):
     def __init__(self, input_dim, hidden_dim, output_dim, num_layers):
-        super(RNNModel, self).__init__()
-        self.rnn = nn.RNN(input_dim, hidden_dim, num_layers, batch_first=True, nonlinearity='tanh')
+        super(LSTMModel, self).__init__()
+        self.lstm = nn.LSTM(input_dim, hidden_dim, num_layers, batch_first=True)
         self.fc = nn.Linear(hidden_dim, output_dim)
 
     def forward(self, x):
-        _, hn = self.rnn(x)  # hn contient les activations finales des couches cachées
+        _, (hn, _) = self.lstm(x)  # hn contient les activations finales des couches cachées
         hn = hn[-1]  # Dernière couche cachée
         out = self.fc(hn)
         return out
@@ -146,15 +146,11 @@ input_dim = X_seq_train.size(2)
 hidden_dim = 64
 output_dim = 1
 num_layers = 2
-model = RNNModel(input_dim, hidden_dim, output_dim, num_layers)
+model = LSTMModel(input_dim, hidden_dim, output_dim, num_layers)
 
 # Définir l'optimiseur et la fonction de perte
 optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 criterion = nn.MSELoss()
-
-# Sauvegarder le meilleur modèle
-best_model_path = "best_rnn_model.pth"
-best_loss = float('inf')
 
 # Entraîner le modèle
 epochs = 50
@@ -168,15 +164,7 @@ for epoch in range(epochs):
         loss.backward()
         optimizer.step()
         total_loss += loss.item()
-
-    avg_loss = total_loss / len(train_loader)
-    print(f"Epoch {epoch+1}/{epochs}, Loss: {avg_loss:.4f}")
-
-    # Sauvegarde si le modèle est meilleur
-    if avg_loss < best_loss:
-        best_loss = avg_loss
-        torch.save(model.state_dict(), best_model_path)
-        print(f"Meilleur modèle sauvegardé avec une perte de {best_loss:.4f}")
+    print(f"Epoch {epoch+1}/{epochs}, Loss: {total_loss / len(train_loader):.4f}")
 
 # Évaluer le modèle
 model.eval()
