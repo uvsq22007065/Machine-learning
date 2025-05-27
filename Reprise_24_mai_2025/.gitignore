@@ -1,0 +1,6 @@
+# Ignore ROS bag files
+*.bag
+
+# Ignore CSV files
+*.csv
+*.xlsx
