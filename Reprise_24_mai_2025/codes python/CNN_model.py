@@ -19,7 +19,7 @@ import logging
 from datetime import datetime
 
 class GaitPhaseEstimator:
-    def __init__(self, data_folder, patient_id="subject1", samples_size=10):
+    def __init__(self, data_folder, patient_id="subject5", samples_size=10):
         # Setup paths
         self.patient = patient_id
         self.base_path = os.path.abspath(data_folder)  # Convert to absolute path
@@ -27,12 +27,9 @@ class GaitPhaseEstimator:
         # Create directory if it doesn't exist
         if not os.path.exists(self.base_path):
             os.makedirs(self.base_path, exist_ok=True)  # Added exist_ok=True
-            
-        self.labels_path = os.path.join(self.base_path, f"{self.patient}_labelsCNN.csv")
-        self.model_path = os.path.join(self.base_path, f"{self.patient}_modelCNN.keras")
-        self.scaler_path = os.path.join(self.base_path, f"{self.patient}_modelCNN_scaler.pkl")
-        self.log_file_path = os.path.join(self.base_path, f"{self.patient}_modelCNN_log.txt")
 
+        self.log_file_path = os.path.join(self.base_path, f"{self.patient}_modelCNN_log.txt")
+        
         # Initialize parameters
         self.fs = 100
         self.force_threshold = 0.04
@@ -60,9 +57,13 @@ class GaitPhaseEstimator:
 
         # Créer un sous-dossier avec la date et l'heure
         now = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.current_results_folder = os.path.join(self.results_folder, f"training_{now}")
-        os.makedirs(self.current_results_folder)
-            
+        self.current_results_folder = os.path.join(self.results_folder, f"CNN_{patient_id}_final_training_{now}")
+        if not os.path.exists(self.current_results_folder):
+            os.makedirs(self.current_results_folder)
+
+        self.labels_path = os.path.join(self.current_results_folder, f"{self.patient}_labelsCNN.csv")
+        self.model_path = os.path.join(self.current_results_folder, f"{self.patient}_modelCNN.keras")
+        self.scaler_path = os.path.join(self.current_results_folder, f"{self.patient}_modelCNN_scaler.pkl")
 
     def setup_logger(self):
         logging.basicConfig(
@@ -242,39 +243,19 @@ class GaitPhaseEstimator:
         # Returns filtered signals
         return filtered_force, filtered_force_d, filtered_angle, filtered_angle_d, filtered_cop, filtered_time, filtered_phase, filtered_progress 
         
-    def train_model(self, data_file, data_percentage=100):
+    def train_model(self, data_file, data_percentage):
         print(f"Training model for patient {self.patient} with {data_percentage}% of data...")
         
         # Load data
         data = self.load_data(data_file)
         
         # Process data (values are already in the correct format from CSV)
-        angle_data = data['Angle'].values
-        interpolated_forces = data['Force'].values
+        angles = data['Angle'].values
+        force_filtered = data['Force'].values
         cop_data = data['CoP'].values
         time_data = data['Time'].values  # Renamed from time to time_data
-
-        ''' Ground Force Filter '''
-        # Force filter and correction
-        force_filtered = filtfilt(self.b, self.a, interpolated_forces)
-        force_filtered = np.array([f if f >= self.force_threshold else 0.0 for f in force_filtered])
-
-        # Derivative of force
-        f_derivative = np.diff(force_filtered)
-        f_derivative = np.append(0, f_derivative)
-
-        forces = force_filtered
-        forces_derivative = f_derivative
-
-        ''' Angle Filter '''
-        angle_filtered = filtfilt(self.b, self.a, angle_data)
-        
-        vel_rps = np.diff(angle_filtered)
-        vel_rps = np.append(0, vel_rps)
-        
-        angles = angle_filtered
-        angles_derivative = vel_rps
-
+        forces_derivative = data['Force_Derivative'].values
+        angles_derivative = data['Angle_Derivative'].values
         cop = cop_data
 
         # Get phase estimation
@@ -289,7 +270,7 @@ class GaitPhaseEstimator:
         gait_phases = gait_phases[:min_length]
         gait_progress = gait_progress[:min_length]
         time_data = time_data[:min_length]
-        forces = forces[:min_length]
+        force_filtered = force_filtered[:min_length]
         angles = angles[:min_length]
         forces_derivative = forces_derivative[:min_length]
         angles_derivative = angles_derivative[:min_length]
@@ -297,7 +278,7 @@ class GaitPhaseEstimator:
 
         # Apply mask to all data
         adjusted_time = time_data[mask]
-        adjusted_force = forces[mask]
+        adjusted_force = force_filtered[mask]
         adjusted_angle = angles[mask]
         adjusted_force_derivatives = forces_derivative[mask]
         adjusted_angle_derivatives = angles_derivative[mask]
@@ -488,7 +469,7 @@ class GaitPhaseEstimator:
             print("----------------------------------------")
 
         # Save overall results
-        results_file = os.path.join(self.current_results_folder, f"{self.patient_id}_overall_results.csv")
+        results_file = os.path.join(self.current_results_folder, f"{self.patient}_overall_results.csv")
         overall_results = [{
             'data_percentage': r['data_percentage'],
             'mse': r['mse'],
@@ -515,7 +496,7 @@ class GaitPhaseEstimator:
             plt.grid(True)
         
         plt.tight_layout()
-        metrics_plot_path = os.path.join(self.current_results_folder, f"{self.patient_id}_metrics_comparison.png")
+        metrics_plot_path = os.path.join(self.current_results_folder, f"{self.patient}_metrics_comparison.svg")
         plt.savefig(metrics_plot_path)
         plt.close()
 
@@ -526,16 +507,16 @@ def main():
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     
     # Chemin vers le dossier de données
-    data_folder = os.path.join(project_root, "train_data_labeled_csv")
+    data_folder = os.path.join(project_root, "train_data_filtered_labeled_csv")
     if not os.path.exists(data_folder):
         os.makedirs(data_folder)
     
     # Fichier de données
-    data_file = os.path.join(data_folder, "subject1_labelsCNN.csv")
+    data_file = os.path.join(data_folder, "subject5_labelsCNN.csv")
     
     # Initialiser et entraîner le modèle
-    estimator = GaitPhaseEstimator(data_folder, patient_id="subject1")
-    
+    estimator = GaitPhaseEstimator(data_folder, patient_id="subject5")
+
     if os.path.exists(data_file):
         results = estimator.train_with_multiple_percentages(data_file)
         print("Entraînement terminé. Les résultats ont été sauvegardés dans:", estimator.current_results_folder)

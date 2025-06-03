@@ -4,3 +4,15 @@
 # Ignore CSV files
 *.csv
 *.xlsx
+
+*.pkl
+*.pb
+*.index
+# Ignore model files
+*.h5
+# Ignore log files
+*.log
+*.data-*
+*.svg
+*.png
+*.txt
