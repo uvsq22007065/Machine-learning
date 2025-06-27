@@ -20,7 +20,7 @@ import logging
 from datetime import datetime
 
 class GaitPhaseEstimator:
-    def __init__(self, data_folder, patient_id="subject8", samples_size=10):
+    def __init__(self, data_folder, patient_id="subject1", samples_size=10):
         # Setup paths
         self.patient = patient_id
         self.base_path = os.path.abspath(data_folder)  # Convert to absolute path
@@ -28,12 +28,9 @@ class GaitPhaseEstimator:
         # Create directory if it doesn't exist
         if not os.path.exists(self.base_path):
             os.makedirs(self.base_path, exist_ok=True)  # Added exist_ok=True
-            
-        self.labels_path = os.path.join(self.base_path, f"{self.patient}_labelsNRAX.csv")
-        self.model_path = os.path.join(self.base_path, f"{self.patient}_modelNRAX.keras")
-        self.scaler_path = os.path.join(self.base_path, f"{self.patient}_modelNRAX_scaler.pkl")
-        self.log_file_path = os.path.join(self.base_path, f"{self.patient}_modelNRAX_log.txt")
 
+        self.log_file_path = os.path.join(self.base_path, f"{self.patient}_modelNRAX_log.txt")
+        
         # Initialize parameters
         self.fs = 100
         self.force_threshold = 0.04
@@ -61,9 +58,13 @@ class GaitPhaseEstimator:
 
         # Créer un sous-dossier avec la date et l'heure
         now = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.current_results_folder = os.path.join(self.results_folder, f"training_{now}")
-        os.makedirs(self.current_results_folder)
-            
+        self.current_results_folder = os.path.join(self.results_folder, f"NRAX_{patient_id}_final_training_{now}_with_prediction")
+        if not os.path.exists(self.current_results_folder):
+            os.makedirs(self.current_results_folder)
+
+        self.labels_path = os.path.join(self.current_results_folder, f"{self.patient}_labelsNRAX.csv")
+        self.model_path = os.path.join(self.current_results_folder, f"{self.patient}_modelNRAX.keras")
+        self.scaler_path = os.path.join(self.current_results_folder, f"{self.patient}_modelNRAX_scaler.pkl")
 
     def setup_logger(self):
         logging.basicConfig(
@@ -243,7 +244,7 @@ class GaitPhaseEstimator:
         # Returns filtered signals
         return filtered_force, filtered_force_d, filtered_angle, filtered_angle_d, filtered_cop, filtered_time, filtered_phase, filtered_progress 
 
-    def build_nrax_model(self, input_shape):
+    def build_NRAX_model(self, input_shape):
         """Create a NRAX model with an attention mechanism."""
         inputs = layers.Input(shape=input_shape)
 
@@ -259,39 +260,19 @@ class GaitPhaseEstimator:
         model.compile(optimizer=Adam(learning_rate=1e-4), loss='mean_squared_error')
         return model
 
-    def train_model(self, data_file, data_percentage=100):
+    def train_model(self, data_file, data_percentage):
         print(f"Training model for patient {self.patient} with {data_percentage}% of data...")
         
         # Load data
         data = self.load_data(data_file)
         
         # Process data (values are already in the correct format from CSV)
-        angle_data = data['Angle'].values
-        interpolated_forces = data['Force'].values
+        angles = data['Angle'].values
+        force_filtered = data['Force'].values
         cop_data = data['CoP'].values
         time_data = data['Time'].values  # Renamed from time to time_data
-
-        ''' Ground Force Filter '''
-        # Force filter and correction
-        force_filtered = filtfilt(self.b, self.a, interpolated_forces)
-        force_filtered = np.array([f if f >= self.force_threshold else 0.0 for f in force_filtered])
-
-        # Derivative of force
-        f_derivative = np.diff(force_filtered)
-        f_derivative = np.append(0, f_derivative)
-
-        forces = force_filtered
-        forces_derivative = f_derivative
-
-        ''' Angle Filter '''
-        angle_filtered = filtfilt(self.b, self.a, angle_data)
-        
-        vel_rps = np.diff(angle_filtered)
-        vel_rps = np.append(0, vel_rps)
-        
-        angles = angle_filtered
-        angles_derivative = vel_rps
-
+        forces_derivative = data['Force_Derivative'].values
+        angles_derivative = data['Angle_Derivative'].values
         cop = cop_data
 
         # Get phase estimation
@@ -306,7 +287,7 @@ class GaitPhaseEstimator:
         gait_phases = gait_phases[:min_length]
         gait_progress = gait_progress[:min_length]
         time_data = time_data[:min_length]
-        forces = forces[:min_length]
+        force_filtered = force_filtered[:min_length]
         angles = angles[:min_length]
         forces_derivative = forces_derivative[:min_length]
         angles_derivative = angles_derivative[:min_length]
@@ -314,7 +295,7 @@ class GaitPhaseEstimator:
 
         # Apply mask to all data
         adjusted_time = time_data[mask]
-        adjusted_force = forces[mask]
+        adjusted_force = force_filtered[mask]
         adjusted_angle = angles[mask]
         adjusted_force_derivatives = forces_derivative[mask]
         adjusted_angle_derivatives = angles_derivative[mask]
@@ -357,41 +338,27 @@ class GaitPhaseEstimator:
         dump(scaler, self.scaler_path)
         print(f"Scaler saved to {self.scaler_path}")
 
-        # Create Sequences
-        def create_sequences(data, labels, seq_length):
-            sequences, label_sequences = [], []
-            for i in range(len(data) - seq_length + 1):
-                sequences.append(data[i:i + seq_length])
-                label_sequences.append(labels[i + seq_length - 1])
-            return np.array(sequences), np.array(label_sequences)
-
-        X_seq, y_seq = create_sequences(X_scaled, y, self.sequence_length)
-
-        X_train, X_test, y_train, y_test = train_test_split(X_seq, y_seq, test_size=0.2, random_state=42)
+        X_train, X_test, y_train, y_test = train_test_split(X_scaled, y, test_size=0.2, random_state=42)
 
         # Adjust training data size based on percentage
         train_size = int(len(X_train) * (data_percentage/100))
         X_train = X_train[:train_size]
         y_train = y_train[:train_size]
 
-        X_train = X_train.reshape((X_train.shape[0], -1))
-
         # NRAX + LSTM Model
         input_shape = (X_train.shape[1],)
-        self.model = self.build_nrax_model(input_shape)
+        self.model = self.build_NRAX_model(input_shape)
 
         self.model.compile(optimizer=Adam(learning_rate=1e-4), loss='mean_squared_error')
-        early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
+        early_stopping = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
 
         # Training
-        print("Training the NRAX model...")
+        print("Training the NRAX+LSTM model...")
 
         initial_time = time.time()
 
-        X_train_reshaped = X_train.reshape((X_train.shape[0], -1))
-        X_test_reshaped = X_test.reshape((X_test.shape[0], -1))
         history = self.model.fit(
-            X_train_reshaped, y_train,
+            X_train, y_train,
             epochs=1000,
             batch_size=32,
             verbose=1,  # Changed from 0 to 1
@@ -410,14 +377,23 @@ class GaitPhaseEstimator:
         val_loss = history.history['val_loss']
 
         # Model Evaluation
-        y_pred = self.model.predict(X_test_reshaped, verbose=1)
+        y_pred = self.model.predict(X_test)
+
+        predictions_df = pd.DataFrame({
+            'True_Progress': y_test.flatten(),
+            'Predicted_Progress': y_pred.flatten()
+        })
+        predictions_path = os.path.join(self.current_results_folder, f"{self.patient}_predictions_{data_percentage}pct.csv")
+        predictions_df.to_csv(predictions_path, index=False)
+        print(f"Prédictions sauvegardées dans {predictions_path}")
+
         mse = mean_squared_error(y_test, y_pred)
         rmse = np.sqrt(mse)
         mae = mean_absolute_error(y_test, y_pred)
         r2 = r2_score(y_test, y_pred)
 
         print(f"Performance Metrics:\nMSE={mse:.4f}, RMSE={rmse:.4f}, MAE={mae:.4f}, R²={r2:.4f}")
-        print("Last Train and Validation Loss for NRAX Model:")
+        print("Last Train and Validation Loss for NRAX+LSTM Model:")
         print(f"Train Loss={train_loss[-1]:.4f}, Validation Loss={val_loss[-1]:.4f}")
 
         # Save model with percentage in filename (changed format)
@@ -472,7 +448,7 @@ class GaitPhaseEstimator:
 
         # Scale input data
         scaled_data = self.scaler.transform(input_data)
-        scaled_data = scaled_data.reshape(1, self.sequence_length, 5)
+        scaled_data = self.scaler.transform(input_data.reshape(1, -1))
 
         # Make prediction
         prediction = float(self.model.predict(scaled_data, verbose=0)[-1])
@@ -525,7 +501,7 @@ class GaitPhaseEstimator:
             plt.grid(True)
         
         plt.tight_layout()
-        metrics_plot_path = os.path.join(self.current_results_folder, f"{self.patient}_metrics_comparison.png")
+        metrics_plot_path = os.path.join(self.current_results_folder, f"{self.patient}_metrics_comparison.svg")
         plt.savefig(metrics_plot_path)
         plt.close()
 
@@ -541,10 +517,10 @@ def main():
         os.makedirs(data_folder)
     
     # Fichier de données
-    data_file = os.path.join(data_folder, "subject8_labelsNRAX.csv")
+    data_file = os.path.join(data_folder, "subject1_labelsNRAX.csv")
     
     # Initialiser et entraîner le modèle
-    estimator = GaitPhaseEstimator(data_folder, patient_id="subject8")
+    estimator = GaitPhaseEstimator(data_folder, patient_id="subject1")
 
     if os.path.exists(data_file):
         results = estimator.train_with_multiple_percentages(data_file)

@@ -1,133 +1,279 @@
 #!/usr/bin/env python3
 
-import rospy, rospkg, rosbag
-from std_msgs.msg import Float64, Int16
-from moticon_insole.msg import InsoleData
-import os, logging
-import time as times
+import os
 import numpy as np
+import pandas as pd
+from datetime import datetime
 from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor, VotingRegressor
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from sklearn.model_selection import train_test_split
-from scipy.signal import butter, filtfilt
 import joblib
-from collections import deque
-
-import pandas as pd
+import time
 import matplotlib.pyplot as plt
+from collections import deque
+from scipy.signal import butter, filtfilt
+import logging
 
 class GaitPhaseEstimator:
-    def __init__(self, samples_size=10):
-        # ROS setup
-        rospy.init_node('gait_phase_estimator_R', anonymous=True)
-
-        # Paths to models and training data
-        self.patient = rospy.get_param("patient", "subject1")
-        rospack = rospkg.RosPack()
-        package_path = rospack.get_path('gait_vector_estimator')
-
-        self.labels_path = os.path.join(package_path, "log", "learning_models", f"{self.patient}_labelsR.xlsx")
-        self.model_path = os.path.join(package_path, "log", "learning_models", f"{self.patient}_modelR")
-        self.bag_path = os.path.join(package_path, "log", "training_bags", f"{self.patient}/{self.patient}_train_merged.bag")
-        self.log_file_path = os.path.join(package_path, "log", "learning_models", f"{self.patient}_modelR_log.txt")
-           
-        # Sampling frequency
-        self.fs = 100
+    def __init__(self, data_folder, patient_id="subject1", samples_size=10):
+        self.patient = patient_id
+        self.base_path = os.path.abspath(data_folder)
         
-        # Butterworth filters for angle, velocity, force, and CoP
-        fc = 5  # cutoff frequency for angle, force, and CoP
-        self.b, self.a = butter(3, fc / (self.fs / 2), btype='low')     
-        fc_vel = 10  # cutoff frequency for velocity
-        self.b_vel, self.a_vel = butter(3, fc_vel / (self.fs / 2), btype='low')
+        if not os.path.exists(self.base_path):
+            os.makedirs(self.base_path, exist_ok=True)
 
-        # Buffers
-        self.window_size = 20
-        self.angles, self.forces, self.cop_x = [], [], []
-        self.ankle_angle_derivative = 0
-        self.ankle_angle = 0
+        # Create results folder structure
+        self.results_folder = os.path.join(os.path.dirname(data_folder), "results")
+        if not os.path.exists(self.results_folder):
+            os.makedirs(self.results_folder)
 
-        self.alpha_vel = 0.1
-        self.alpha_force = 0.05
+        now = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.current_results_folder = os.path.join(self.results_folder, f"Classical_{patient_id}_training_{now}")
+        if not os.path.exists(self.current_results_folder):
+            os.makedirs(self.current_results_folder)
 
-        # Variables to track state
+        # Initialize model variables
         self.modelLoaded = False
         self.model = None
         self.model_GBR = None
         self.model_RFR = None
         self.model_VR = None
-        self.angleUpdated = False
-        self.forceUpdated = False
-
         self.force_threshold = 0.04
+        self.samples_size = samples_size
 
-        # Variable for estimation
-        self.samples_size = samples_size 
-        self.current_phase = deque(maxlen=self.samples_size) 
-        self.ankle_angle = None
-        self.ground_force = None
-        self.smoothed_estimated_phase = 0
-        self.prediction_buffer = []
+        # Add filter parameters
+        self.fs = 100
+        fc = 5
+        self.b, self.a = butter(3, fc / (self.fs / 2), btype='low')
+        fc_vel = 10
+        self.b_vel, self.a_vel = butter(3, fc_vel / (self.fs / 2), btype='low')
+
+        # Initialize log file path
+        self.log_file_path = os.path.join(data_folder, f"{patient_id}_gait_estimation.log")
+        self.setup_logger()
+        
+        self.labels_path = os.path.join(self.current_results_folder, f"{self.patient}_labelsR.csv")
 
     def setup_logger(self):
-        log_formatter = logging.Formatter('[%(asctime)s] %(message)s')
-        file_handler = logging.FileHandler(self.log_file_path)
-        file_handler.setFormatter(log_formatter)
+        """Setup logging configuration"""
+        logging.basicConfig(
+            filename=self.log_file_path,
+            level=logging.INFO,
+            format='[%(asctime)s] %(message)s'
+        )
 
-        roslog = logging.getLogger('rosout')
-        roslog.setLevel(logging.INFO)
-        roslog.addHandler(file_handler)
+    def load_data(self, data_file):
+        """Load and process data from CSV file"""
+        print(f"Loading data from {data_file}")
+        data = pd.read_csv(data_file)
+        return data
 
-    def sub_pub_initialization(self):
-        # ROS Subscribers and Publishers
-        self.ankle_angle_sub = rospy.Subscriber('/ankle_joint/angle', Float64, self.ankle_angle_callback)
-        self.ground_force_sub = rospy.Subscriber('/moticon_insole_data/left', InsoleData, self.ground_force_callback)
-        #self.gait_ptg_pub = rospy.Publisher('/gait_percentage_R', Int16, queue_size=2)
-        self.gait_ptg_gbr_pub = rospy.Publisher('/gait_percentage_R_GBR', Int16, queue_size=2)
-        self.gait_ptg_rfr_pub = rospy.Publisher('/gait_percentage_R_RFR', Int16, queue_size=2)
-        self.gait_ptg_vr_pub = rospy.Publisher('/gait_percentage_R_VR', Int16, queue_size=2)
-        self.force_dt_pub = rospy.Publisher('/force_derivative_R', Float64, queue_size=2)
-        self.angle_dt_pub = rospy.Publisher('/angle_derivative_R', Float64, queue_size=2)
-        self.phase_pub = rospy.Publisher('/stance_swing_phase_R', Int16, queue_size=2)  
+    def train_model(self, data_file, data_percentage):
+        print(f"Training model for patient {self.patient} with {data_percentage}% of data...")
+        
+        # Load data
+        data = self.load_data(data_file)
+        
+        # Process data
+        angles = data['Angle'].values
+        force_filtered = data['Force'].values
+        cop_data = data['CoP'].values
+        time_data = data['Time'].values
+        forces_derivative = data['Force_Derivative'].values
+        angles_derivative = data['Angle_Derivative'].values
+        
+        # Get phase estimation
+        gait_phases, gait_progress, start_time, end_time, stance_mask = self.offline_phase_estimator(time_data, force_filtered)
 
-    def ankle_angle_callback(self, msg):
-        """Updates Angle Buffer (IMU)"""
-        self.angles.append(msg.data)
+        # Create mask and ensure all arrays have the same length
+        mask = (time_data >= start_time) & (time_data <= end_time)
+        min_length = min(len(mask), len(gait_phases))
+        
+        # Truncate and apply mask to all data
+        mask = mask[:min_length]
+        filtered_data = self.process_and_filter_data(
+            mask, min_length, time_data, force_filtered, angles,
+            forces_derivative, angles_derivative, cop_data,
+            gait_phases, gait_progress
+        )
 
-        if len(self.angles) > self.window_size:
-            angle_rad = np.deg2rad(self.angles)
-            angle_filtered = filtfilt(self.b, self.a, angle_rad)
+        # Save processed data
+        processed_data = pd.DataFrame({
+            'Time': filtered_data['time'],
+            'Force': filtered_data['force'],
+            'Force_Derivative': filtered_data['force_d'],
+            'Angle': filtered_data['angle'],
+            'Angle_Derivative': filtered_data['angle_d'],
+            'CoP': filtered_data['cop'],
+            'Gait_Progress': filtered_data['progress'],
+            'Phase': filtered_data['phase']
+        })
+        processed_data.to_csv(os.path.join(self.current_results_folder, 
+                            f"{self.patient}_processed_data_{data_percentage}pct.csv"), index=False)
 
-            vel_rps = np.diff(angle_filtered) #* self.fs
-            # vel_filtered = lfilter(self.b_vel, self.a_vel, vel_rps) 
+        # Prepare training data
+        X = np.column_stack((filtered_data['force'], filtered_data['force_d'], 
+                           filtered_data['angle'], filtered_data['angle_d'], 
+                           filtered_data['cop']))
+        y = np.array(filtered_data['progress'])
 
-            self.ankle_angle = angle_filtered[-1]
-            self.ankle_angle_derivative = vel_rps[-1]
-            self.angleUpdated = True
+        # Split and adjust data size
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+        train_size = int(len(X_train) * (data_percentage/100))
+        X_train = X_train[:train_size]
+        y_train = y_train[:train_size]
 
-            self.angles.pop(0)
+        # Train and evaluate models with detailed logging and visualization
+        results = {}
+        for name, model in self.get_models().items():
+            print(f"\nTraining {name} model...")
+            logging.info(f"Starting training for {name} model with {data_percentage}% data")
+            
+            initial_time = time.time()
+            history = model.fit(X_train, y_train)
+            training_duration = time.time() - initial_time
 
-    def ground_force_callback(self, msg):
-        """Updates Force Buffer (Insole)"""
-        self.forces.append(msg.normalised_force if msg.normalised_force >= self.force_threshold else 0.0)
-        self.cop_x.append(msg.cop_x)
+            y_pred = model.predict(X_test)
+            
+            metrics = self.calculate_metrics(y_test, y_pred)
+            metrics['training_duration'] = training_duration
+            results[name] = metrics
 
-        if len(self.forces) > self.window_size:
-            force_filtered = filtfilt(self.b, self.a, self.forces)
-            force_filtered = np.array([f if f >= self.force_threshold else 0.0 for f in force_filtered])
+            # Enhanced logging and visualization
+            self.save_model_artifacts(name, model, data_percentage, y_test, y_pred)
+            self.plot_predictions(y_test, y_pred, name, data_percentage)
+            
+            # Log detailed metrics
+            logging.info(f"Model: {name} - Data: {data_percentage}%")
+            for metric, value in metrics.items():
+                logging.info(f"{metric}: {value:.4f}")
 
-            force_derivative = np.diff(force_filtered)
-            # force_derivative_filtered = filtfilt(self.b, self.a, force_derivative)
+        # Save detailed results and create additional visualizations
+        self.save_detailed_results(results, data_percentage)
+        self.plot_performance_metrics(results, data_percentage)
 
-            self.ground_force = force_filtered[-1]
-            self.ground_force_derivative = force_derivative[-1]
-            self.cop = self.cop_x[-1]
-            self.forceUpdated = True
+        return results
 
-            self.forces.pop(0)
+    def process_and_filter_data(self, mask, min_length, time_data, force_filtered, angles,
+                              forces_derivative, angles_derivative, cop_data, 
+                              gait_phases, gait_progress):
+        # Truncate arrays
+        arrays = {
+            'time': time_data[:min_length][mask],
+            'force': force_filtered[:min_length][mask],
+            'angle': angles[:min_length][mask],
+            'force_d': forces_derivative[:min_length][mask],
+            'angle_d': angles_derivative[:min_length][mask],
+            'cop': cop_data[:min_length][mask]
+        }
+        
+        # Get filtered data using create_dataset_per_cycles
+        filtered_data = self.create_dataset_per_cycles(
+            arrays['force'], arrays['force_d'], arrays['angle'],
+            arrays['angle_d'], arrays['cop'], arrays['time'],
+            gait_phases[mask], gait_progress[mask]
+        )
+        
+        return dict(zip(['force', 'force_d', 'angle', 'angle_d', 'cop', 'time', 'phase', 'progress'], 
+                       filtered_data))
 
-    def offline_phase_estimator(self, time, interpolated_forces):
-        stance_mask = interpolated_forces >= self.force_threshold  # True for stance, False for swing
+    def get_models(self):
+        return {
+            'Gradient Boosting': GradientBoostingRegressor(n_estimators=100, learning_rate=0.1, max_depth=9, random_state=42),
+            'Random Forest': RandomForestRegressor(n_estimators=100, random_state=42),
+            'Voting Regressor': VotingRegressor(estimators=[
+                ('lr', LinearRegression()),
+                ('rf', RandomForestRegressor(n_estimators=100, random_state=42)),
+                ('gb', GradientBoostingRegressor(n_estimators=100, learning_rate=0.1, max_depth=9, random_state=42))
+            ])
+        }
+
+    def calculate_metrics(self, y_true, y_pred):
+        return {
+            'mse': mean_squared_error(y_true, y_pred),
+            'rmse': np.sqrt(mean_squared_error(y_true, y_pred)),
+            'mae': mean_absolute_error(y_true, y_pred),
+            'r2': r2_score(y_true, y_pred)
+        }
+
+    def save_model_artifacts(self, model_name, model, data_percentage, y_test, y_pred):
+        # Save model
+        model_path = os.path.join(self.current_results_folder, 
+                                f"{self.patient}_{model_name.replace(' ', '_')}_{data_percentage}pct.joblib")
+        joblib.dump(model, model_path)
+
+        # Save predictions
+        predictions_df = pd.DataFrame({
+            'True_Progress': y_test,
+            'Predicted_Progress': y_pred
+        })
+        pred_path = os.path.join(self.current_results_folder, 
+                               f"{self.patient}_{model_name.replace(' ', '_')}_{data_percentage}pct_predictions.csv")
+        predictions_df.to_csv(pred_path, index=False)
+
+    def train_with_multiple_percentages(self, data_file):
+        percentages = [10, 20, 40, 60, 80, 100]
+        all_results = []
+        
+        for pct in percentages:
+            print(f"\nTraining with {pct}% of data...")
+            results = self.train_model(data_file, pct)
+            
+            # Compile results for all models
+            for model_name, model_results in results.items():
+                result_entry = {
+                    'data_percentage': pct,
+                    'model': model_name,
+                    'mse': model_results['mse'],
+                    'rmse': model_results['rmse'],
+                    'mae': model_results['mae'],
+                    'r2': model_results['r2'],
+                    'training_duration': model_results['training_duration']
+                }
+                all_results.append(result_entry)
+                
+                print(f"\nResults for {model_name} with {pct}% of data:")
+                print(f"MSE: {model_results['mse']:.4f}")
+                print(f"RMSE: {model_results['rmse']:.4f}")
+                print(f"MAE: {model_results['mae']:.4f}")
+                print(f"R²: {model_results['r2']:.4f}")
+                print(f"Training duration: {model_results['training_duration']:.2f} seconds")
+                print("----------------------------------------")
+
+        # Save overall results
+        results_df = pd.DataFrame(all_results)
+        results_file = os.path.join(self.current_results_folder, f"{self.patient}_overall_results.csv")
+        results_df.to_csv(results_file, index=False)
+
+        # Create comparative plots
+        self.plot_metrics_comparison(results_df)
+        
+        return all_results
+
+    def plot_metrics_comparison(self, results_df):
+        metrics = ['mse', 'rmse', 'mae', 'r2']
+        models = results_df['model'].unique()
+        
+        plt.figure(figsize=(15, 10))
+        for i, metric in enumerate(metrics, 1):
+            plt.subplot(2, 2, i)
+            for model in models:
+                model_data = results_df[results_df['model'] == model]
+                plt.plot(model_data['data_percentage'], model_data[metric], 'o-', label=model)
+            plt.xlabel('Data Percentage')
+            plt.ylabel(metric.upper())
+            plt.title(f'{metric.upper()} vs Data Percentage')
+            plt.grid(True)
+            plt.legend()
+        
+        plt.tight_layout()
+        metrics_plot_path = os.path.join(self.current_results_folder, f"{self.patient}_metrics_comparison.svg")
+        plt.savefig(metrics_plot_path)
+        plt.close()
+
+    def offline_phase_estimator(self, time, interpolated_forces_raw):
+        stance_mask = interpolated_forces_raw >= self.force_threshold
         gait_phases = []
         gait_progress = []
         start_index = 0
@@ -173,52 +319,40 @@ class GaitPhaseEstimator:
         gait_progress = np.array(gait_progress)
 
         return gait_phases, gait_progress, start_time, end_time, stance_mask
-    
-    def select_consistent_cycles(self, cycles_angle, cycles_phase, percentage=70):
-        # Creation of a common phase standardised from 0 to 100% with 1000 points
-        common_phase = np.linspace(0, 100, 1000)
-        interpolated_angles = []  # List of interpolated angles on the common phase
-        valid_indices = []        # Indices of valid cycles
 
-        # Loop on all cycles supplied
+    def select_consistent_cycles(self, cycles_angle, cycles_phase, percentage=70):
+        common_phase = np.linspace(0, 100, 1000)
+        interpolated_angles = []
+        valid_indices = []
+
         for i, (angle, phase) in enumerate(zip(cycles_angle, cycles_phase)):
             if len(phase) < 2:
-                continue  # Cycles too short to interpolate are ignored
+                continue
 
-            # Interpolation of the angle on the common phase
             interp = np.interp(common_phase, phase, angle, left=np.nan, right=np.nan)
 
-            # Cycles whose interpolation does not contain NaN
             if not np.isnan(interp).any():
                 interpolated_angles.append(interp)
                 valid_indices.append(i)
 
         interpolated_angles = np.array(interpolated_angles)
 
-        # If fewer than 3 valid cycles, cannot calculate a reliable average.
         if len(interpolated_angles) < 3:
             return valid_indices
 
-        # Calculating the average cycle for comparison
         mean_angle = np.mean(interpolated_angles, axis=0)
-
-        # Calculation of the similarity score (correlation) of each cycle with the average cycle
         similarity_scores = np.array([
             np.corrcoef(row, mean_angle)[0, 1] for row in interpolated_angles
         ])
 
-        # Sort indices by decreasing similarity
         sorted_indices = np.argsort(similarity_scores)[::-1]
-
-        # Selection of a given percentage of the best cycles
         n_select = max(1, round((percentage / 100) * len(sorted_indices)))
         selected_indices = [valid_indices[i] for i in sorted_indices[:n_select]]
 
-        return selected_indices  # Returns the indices of the most consistent cycles
+        return selected_indices
 
     def create_dataset_per_cycles(self, adjusted_force, adjusted_force_derivatives, adjusted_angle,
                                 adjusted_angle_derivatives, adjusted_cop, adjusted_time, gait_phases, gait_progress):
-        # Lists for storing extracted cycles
         cycles_force = []
         cycles_force_deriv = []
         cycles_angle = []
@@ -228,12 +362,10 @@ class GaitPhaseEstimator:
         cycles_phase = []
         cycles_progress = []
 
-        # Temporary dictionary for accumulating cycle data
-        current_cycle = {'force': [], 'force_d': [], 'angle': [], 'angle_d': [],'cop': [], 'time': [], 'phase': [], 'progress': []}
+        current_cycle = {'force': [], 'force_d': [], 'angle': [], 'angle_d': [],
+                        'cop': [], 'time': [], 'phase': [], 'progress': []}
 
-        # Loop on each data point
         for i, label in enumerate(gait_phases):
-            # Filling the current cycle
             current_cycle['force'].append(adjusted_force[i])
             current_cycle['force_d'].append(adjusted_force_derivatives[i])
             current_cycle['angle'].append(adjusted_angle[i])
@@ -243,341 +375,157 @@ class GaitPhaseEstimator:
             current_cycle['phase'].append(label)
             current_cycle['progress'].append(gait_progress[i])
 
-            # End of cycle detected: swing -> stance transition or end of data
             if label == 'swing_phase' and (i + 1 == len(gait_phases) or gait_phases[i + 1] == 'stance_phase'):
-                # Cycle storage complete
                 cycles_force.append(np.array(current_cycle['force']))
                 cycles_force_deriv.append(np.array(current_cycle['force_d']))
                 cycles_angle.append(np.array(current_cycle['angle']))
                 cycles_angle_deriv.append(np.array(current_cycle['angle_d']))
                 cycles_cop.append(np.array(current_cycle['cop']))
                 cycles_time.append(np.array(current_cycle['time']))
-                # Creation of a linear phase from 0 to 100% for the cycle
                 cycles_phase.append(np.linspace(0, 100, len(current_cycle['angle'])))
                 cycles_progress.append(np.array(current_cycle['progress']))
 
-                # Reset for next cycle
-                current_cycle = {'force': [], 'force_d': [], 'angle': [], 'angle_d': [], 'cop': [],'time': [], 'phase': [], 'progress': []}
+                current_cycle = {'force': [], 'force_d': [], 'angle': [], 'angle_d': [], 
+                               'cop': [], 'time': [], 'phase': [], 'progress': []}
 
-        # If no cycle has been identified, return the original data
         if len(cycles_angle) == 0:
             return adjusted_force, adjusted_force_derivatives, adjusted_angle, adjusted_angle_derivatives, adjusted_cop, adjusted_time, gait_phases, gait_progress
 
-        # Selection of the most coherent cycles
         selected_indices_angle = self.select_consistent_cycles(cycles_angle, cycles_phase, percentage=90)
         selected_indices_force = self.select_consistent_cycles(cycles_force, cycles_phase, percentage=90)
         selected_indices = list(set(selected_indices_angle) & set(selected_indices_force))
 
-        # Reconstruction of filtered signals from selected cycles
         filtered_force = np.concatenate([cycles_force[i] for i in selected_indices])
         filtered_force_d = np.concatenate([cycles_force_deriv[i] for i in selected_indices])
         filtered_angle = np.concatenate([cycles_angle[i] for i in selected_indices])
         filtered_angle_d = np.concatenate([cycles_angle_deriv[i] for i in selected_indices])
         filtered_cop = np.concatenate([cycles_cop[i] for i in selected_indices])
         filtered_time = np.concatenate([cycles_time[i] for i in selected_indices])
-
-        # Phase reconstruction: if < 60%, consider stance, otherwise swing
-        filtered_phase = np.concatenate([['stance_phase' if p < 60 else 'swing_phase' for p in cycles_phase[i]] for i in selected_indices])
+        filtered_phase = np.concatenate([['stance_phase' if p < 60 else 'swing_phase' for p in cycles_phase[i]] 
+                                       for i in selected_indices])
         filtered_progress = np.concatenate([cycles_progress[i] for i in selected_indices])
 
-        ptg_data = (len(filtered_time)*100.0/len(adjusted_time))
-        rospy.loginfo("Percentage of data used to train: " + str(ptg_data))
+        print("Percentage of data used to train: " + str((len(filtered_time)*100.0/len(adjusted_time))))
 
-        # Returns filtered signals
-        return filtered_force, filtered_force_d, filtered_angle, filtered_angle_d, filtered_cop, filtered_time, filtered_phase, filtered_progress 
-    
-    def train_model(self):
-        rospy.loginfo(f"Training model for patient {self.patient}...")
-        self.setup_logger()
+        return filtered_force, filtered_force_d, filtered_angle, filtered_angle_d, filtered_cop, filtered_time, filtered_phase, filtered_progress
 
-        # Check if the bag file exists
-        if not os.path.exists(self.bag_path):
-            rospy.logerr(f"No .bag file found for patient {self.patient} in {self.bag_path}. Training cannot proceed.")
-            rospy.signal_shutdown("Missing .bag file for training.")
-            return
-
-        # Read bag file and extract data
-        bag = rosbag.Bag(self.bag_path)
-        angle_data = []
-        vgrf_data = []
-        cop_data = []
-
-        for topic, msg, t in bag.read_messages(topics=['/ankle_joint/angle', '/moticon_insole_data/left']):
-            if topic == '/ankle_joint/angle':
-                angle_data.append((t.to_sec(), msg.data))
-            elif topic == '/moticon_insole_data/left':
-                force_value = msg.normalised_force if msg.normalised_force >= self.force_threshold else 0.0
-                vgrf_data.append((t.to_sec(), force_value))
-                cop_data.append(msg.cop_x)
-
-        bag.close()
-        angle_data = np.array(angle_data)
-        vgrf_data = np.array(vgrf_data)
-        cop_data = np.array(cop_data)
-
-        interpolated_angles = np.interp(vgrf_data[:, 0], angle_data[:, 0], angle_data[:, 1])
-        interpolated_forces = vgrf_data[:, 1]
-        time = vgrf_data[:, 0] - vgrf_data[0, 0]
-
-        ''' Angle Filter '''
-        angle_rad = np.deg2rad(interpolated_angles)
-        angle_filtered = filtfilt(self.b, self.a, angle_rad)
-
-        vel_rps = np.diff(angle_filtered) #* self.fs
-        vel_rps = np.append(0, vel_rps)
-        # vel_filtered = filtfilt(self.b_vel, self.a_vel, vel_rps)
+    def plot_predictions(self, y_true, y_pred, model_name, data_percentage):
+        """Create detailed prediction plots"""
+        plt.figure(figsize=(10, 6))
+        plt.scatter(y_true, y_pred, alpha=0.5)
+        plt.plot([0, 100], [0, 100], 'r--')  # Perfect prediction line
+        plt.xlabel('True Progress')
+        plt.ylabel('Predicted Progress')
+        plt.title(f'{model_name} Predictions vs True Values ({data_percentage}% data)')
         
-        angles = angle_filtered
-        angles_derivative = vel_rps
-
-        ''' Ground Force Filter '''
-        # Force filter and correction
-        force_filtered = filtfilt(self.b, self.a, interpolated_forces)
-        force_filtered = np.array([f if f >= self.force_threshold else 0.0 for f in interpolated_forces])
-
-        # Derivative of force
-        f_derivative = np.diff(force_filtered)
-        f_derivative = np.append(0,f_derivative)
-        # force_derivative_filtered = filtfilt(self.b, self.a, force_derivative)
-
-        forces = force_filtered
-        forces_derivative = f_derivative
-
-        cop = cop_data
+        # Add metrics text to plot
+        mse = mean_squared_error(y_true, y_pred)
+        r2 = r2_score(y_true, y_pred)
+        plt.text(0.05, 0.95, f'MSE: {mse:.4f}\nR²: {r2:.4f}', 
+                transform=plt.gca().transAxes, 
+                bbox=dict(facecolor='white', alpha=0.8))
         
-        ''' Gait Phase Estimator offline '''
-        (gait_phases, gait_progress, start_time, end_time, stance_mask) = self.offline_phase_estimator(time, interpolated_forces)
+        plot_path = os.path.join(self.current_results_folder, 
+                                f"{self.patient}_{model_name.replace(' ', '_')}_{data_percentage}pct_predictions.svg")
+        plt.savefig(plot_path)
+        plt.close()
 
-        # force_filtered[stance_mask == 0] = 0
-        interpolated_forces[stance_mask == 0] = 0
-
-        mask = (time >= start_time) & (time <= end_time)
-        adjusted_time = time[mask]
-        adjusted_force = forces[mask]
-        adjusted_angle = angles[mask]
-        adjusted_force_derivatives = forces_derivative[mask]
-        adjusted_angle_derivatives = angles_derivative[mask]
-        adjusted_cop = cop[mask]
-        
-        rospy.loginfo(f"Saving gait data to {self.labels_path}...")
-
-        ''' Select most consistent trials '''
-        [filtered_force, filtered_force_d, filtered_angle, filtered_angle_d, filtered_cop, filtered_time, filtered_phase, filtered_progress] = self.create_dataset_per_cycles(adjusted_force, adjusted_force_derivatives, adjusted_angle,
-                            adjusted_angle_derivatives, adjusted_cop, adjusted_time, gait_phases, gait_progress) 
-
-        df1 = pd.DataFrame({
-            'Time': adjusted_time,
-            'Force': adjusted_force,
-            'Force_Derivative': adjusted_force_derivatives,
-            'Angle': adjusted_angle,
-            'Angle_Derivative': adjusted_angle_derivatives,
-            'CoP': adjusted_cop,
-            'Gait_Progress': gait_progress,
-            'Phase': gait_phases
-        })
-
-        df2 = pd.DataFrame({
-            'Time': filtered_time,
-            'Force': filtered_force,
-            'Force_Derivative': filtered_force_d,
-            'Angle': filtered_angle,
-            'Angle_Derivative': filtered_angle_d,
-            'CoP': filtered_cop,
-            'Gait_Progress': filtered_progress,
-            'Phase': filtered_phase
-        })
-
-        # Save to different sheets in the same file
-        with pd.ExcelWriter(self.labels_path, engine='xlsxwriter') as writer:
-            df1.to_excel(writer, sheet_name='Raw Data', index=False)
-            df2.to_excel(writer, sheet_name='Filtered Data', index=False)
-
-        rospy.loginfo(f"Gait data saved successfully.")
-
-        X = np.column_stack((filtered_force, filtered_force_d, filtered_angle, filtered_angle_d, filtered_cop))
-        y = np.array(filtered_progress)
-
-        # Split data
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-
-        models = {
-            'Gradient Boosting': GradientBoostingRegressor(n_estimators=100, learning_rate=0.1, max_depth=9, random_state=42),
-            'Random Forest': RandomForestRegressor(n_estimators=100, random_state=42),
-            'Voting Regressor': VotingRegressor(estimators=[
-                ('lr', LinearRegression()),
-                ('rf', RandomForestRegressor(n_estimators=100, random_state=42)),
-                ('gb', GradientBoostingRegressor(n_estimators=100, learning_rate=0.1, max_depth=9, random_state=42))
-            ])
-        }
-
-        # Train each model and evaluate performance
-        performance_metrics = {}
-        loss_history = {}
-
-        for name, model in models.items():
-            rospy.loginfo(f"Training {name} model...")
-
-            train_loss = []
-            val_loss = []
-
-            if isinstance(model, GradientBoostingRegressor):  
-                
-                initial_time = times.time()
-
-                model.fit(X_train, y_train)
-                
-                final_time = times.time()
-                training_duration = final_time - initial_time
-                rospy.loginfo(f"Training time: {training_duration:.2f} seconds")
-                
-                for y_train_pred, y_pred in zip(model.staged_predict(X_train), model.staged_predict(X_test)):
-                    train_loss.append(mean_squared_error(y_train, y_train_pred))
-                    val_loss.append(mean_squared_error(y_test, y_pred))
-
-                epochs = list(range(1, len(train_loss) + 1))
-
-            else:
-                initial_time = times.time()
-                
-                model.fit(X_train, y_train)
-                
-                final_time = times.time()
-                training_duration = final_time - initial_time
-                rospy.loginfo(f"Training time: {training_duration:.2f} seconds")
-
-                y_train_pred = model.predict(X_train)
-                y_pred = model.predict(X_test)
-
-                train_loss = [mean_squared_error(y_train, y_train_pred)]  # Single loss value
-                val_loss = [mean_squared_error(y_test, y_pred)]
-                epochs = [1]
-
-            loss_history[name] = {
-                'train_loss': train_loss,
-                'val_loss': val_loss,
-                'epochs': epochs
-            }
-            
-            mse = mean_squared_error(y_test, y_pred)
-            rmse = np.sqrt(mse)  # Root Mean Squared Error
-            mae = mean_absolute_error(y_test, y_pred)
-            r2 = r2_score(y_test, y_pred)  # R² score
-
-            performance_metrics[name] = {
-                'MSE': mse,
-                'RMSE': rmse,
-                'MAE': mae,
-                'R² Score': r2
-            }
-
-            plt.figure()
-            plt.plot(epochs, train_loss, label="Train Loss", marker='o')
-            plt.plot(epochs, val_loss, label="Validation Loss", marker='s')
-            
-            plt.xlabel("Epochs")
-            plt.ylabel("MSE Loss")
-            plt.legend()
-            plt.title(f"Training vs Validation Loss ({name})")
-            loss_plot_path = os.path.join(os.path.dirname(self.model_path), f"{self.patient}_{name}_loss_plot.png")
-            plt.savefig(loss_plot_path)
-            plt.close()
-
-        # Print Performance Metrics
-        rospy.loginfo("Performance Comparison:")
-        for model, metrics in performance_metrics.items():
-            rospy.loginfo(f"{model}: MSE={metrics['MSE']:.4f}, RMSE={metrics['RMSE']:.4f}, MAE={metrics['MAE']:.4f}, R²={metrics['R² Score']:.4f}")
-        # Print Last Train and Validation Loss for All Models
-        rospy.loginfo("Last Train and Validation Loss for Each Model:")
-        for name in loss_history:
-            last_train_loss = loss_history[name]['train_loss'][-1]
-            last_val_loss = loss_history[name]['val_loss'][-1]
-            rospy.loginfo(f"{name}: Last Train Loss={last_train_loss:.4f}, Last Validation Loss={last_val_loss:.4f}")
-
-
-        model = models['Gradient Boosting']
-        model_GBR = models['Gradient Boosting']
-        model_RFR = models['Random Forest']
-        model_VR = models['Voting Regressor']
-
-        rospy.loginfo(f"Saving models to {self.model_path}...")
-        joblib.dump(model, self.model_path + ".pkl")
-        joblib.dump(model_GBR, self.model_path + "_GBR.pkl")
-        joblib.dump(model_RFR, self.model_path + "_RFR.pkl")
-        joblib.dump(model_VR, self.model_path + "_VR.pkl")
-        rospy.loginfo(f"Model saved successfully.")
-
+    def predict(self, input_data, model_name='Gradient Boosting'):
+        """Make predictions using the specified model"""
+        model_path = os.path.join(self.current_results_folder, 
+                                f"{self.patient}_{model_name.replace(' ', '_')}_100pct.joblib")
         try:
-            self.model = joblib.load(self.model_path + ".pkl")
-            self.model_GBR = joblib.load(self.model_path + "_GBR.pkl")
-            self.model_RFR = joblib.load(self.model_path + "_RFR.pkl")
-            self.model_VR = joblib.load(self.model_path + "_VR.pkl")
-
-            self.modelLoaded = True
-            return 1
+            model = joblib.load(model_path)
+            prediction = float(model.predict([input_data])[0])
+            logging.info(f"Prediction made using {model_name}: {prediction}")
+            return prediction
         except FileNotFoundError:
-            rospy.logerr("Models were not loaded, please verify")
-            self.modelLoaded = False
-            return 0
+            logging.error(f"Model {model_name} not found at {model_path}")
+            raise Exception(f"Model {model_name} not found. Please train the model first.")
 
-    def estimate_phase(self):
-        if self.modelLoaded and self.angleUpdated and self.forceUpdated:
+    def plot_training_history(self, train_metrics, val_metrics, epochs, model_name, data_percentage):
+        """Plot training history for a model"""
+        plt.figure(figsize=(10, 6))
+        plt.plot(epochs, train_metrics, label='Training Loss')
+        plt.plot(epochs, val_metrics, label='Validation Loss')
+        plt.xlabel('Epoch')
+        plt.ylabel('Loss')
+        plt.title(f'Training History - {model_name} ({data_percentage}% data)')
+        plt.legend()
+        plt.grid(True)
+        
+        history_plot_path = os.path.join(self.current_results_folder, 
+                                       f"{self.patient}_{model_name.replace(' ', '_')}_{data_percentage}pct_history.svg")
+        plt.savefig(history_plot_path)
+        plt.close()
 
-            current_input = [
-                self.ground_force, self.ground_force_derivative,
-                self.ankle_angle, self.ankle_angle_derivative,
-                self.cop
-            ]
-            new_phase = float(self.model.predict([current_input])[-1])
-            new_phase_GBR = float(self.model_GBR.predict([current_input])[-1])
-            new_phase_RFR = float(self.model_RFR.predict([current_input])[-1])
-            new_phase_VR = float(self.model_VR.predict([current_input])[-1])
+    def plot_performance_metrics(self, results, data_percentage):
+        """Plot detailed performance metrics"""
+        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(15, 10))
+        
+        for model_name in results.keys():
+            metrics = results[model_name]
+            ax1.plot(['MSE'], [metrics['mse']], 'o-', label=model_name)
+            ax2.plot(['RMSE'], [metrics['rmse']], 'o-', label=model_name)
+            ax3.plot(['MAE'], [metrics['mae']], 'o-', label=model_name)
+            ax4.plot(['R²'], [metrics['r2']], 'o-', label=model_name)
+        
+        axes = [ax1, ax2, ax3, ax4]
+        titles = ['Mean Squared Error', 'Root Mean Squared Error', 
+                 'Mean Absolute Error', 'R² Score']
+        
+        for ax, title in zip(axes, titles):
+            ax.set_title(title)
+            ax.grid(True)
+            ax.legend()
+        
+        plt.tight_layout()
+        metrics_detail_path = os.path.join(self.current_results_folder, 
+                                         f"{self.patient}_detailed_metrics_{data_percentage}pct.svg")
+        plt.savefig(metrics_detail_path)
+        plt.close()
 
-            # Publisher for states derivatives
-            self.angle_dt_pub.publish(self.ankle_angle_derivative)
-            self.force_dt_pub.publish(self.ground_force_derivative)
+    def save_detailed_results(self, results, data_percentage):
+        """Save detailed results to CSV"""
+        detailed_results = []
+        
+        for model_name, metrics in results.items():
+            result_entry = {
+                'model': model_name,
+                'data_percentage': data_percentage,
+                'mse': metrics['mse'],
+                'rmse': metrics['rmse'],
+                'mae': metrics['mae'],
+                'r2': metrics['r2'],
+                'training_duration': metrics['training_duration']
+            }
+            detailed_results.append(result_entry)
+        
+        results_df = pd.DataFrame(detailed_results)
+        detailed_results_path = os.path.join(self.current_results_folder, 
+                                           f"{self.patient}_detailed_results_{data_percentage}pct.csv")
+        results_df.to_csv(detailed_results_path, index=False)
 
-            self.prediction_buffer.append(new_phase)
-            if len(self.prediction_buffer) > self.samples_size:
-                self.prediction_buffer.pop(0)
+def main():
+    # Project root directory
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    
+    # Data folder path
+    data_folder = os.path.join(project_root, "train_data_filtered_labeled_csv")
+    if not os.path.exists(data_folder):
+        os.makedirs(data_folder)
+    
+    # Data file
+    data_file = os.path.join(data_folder, "subject1_labelsR.csv")
+    
+    # Initialize and train model
+    estimator = GaitPhaseEstimator(data_folder, patient_id="subject1")
 
-            # Publisher for the gait phase estimator
-            self.gait_ptg_gbr_pub.publish(int(new_phase_GBR))
-            self.gait_ptg_rfr_pub.publish(int(new_phase_RFR))
-            self.gait_ptg_vr_pub.publish(int(new_phase_VR))
+    if os.path.exists(data_file):
+        results = estimator.train_with_multiple_percentages(data_file)
+        print("Training completed. Results saved in:", estimator.current_results_folder)
+    else:
+        print(f"Error: File {data_file} does not exist")
 
-            # Publisher to determine stance and swing phase
-            phase_indicator = Int16()
-            phase_indicator.data = 100 if self.ground_force == 0 else 0
-            self.phase_pub.publish(phase_indicator)
-
-            self.angleUpdated = False
-            self.forceUpdated = False
-
-    def run(self):
-        rate = rospy.Rate(200)
-        if os.path.exists(self.model_path + ".pkl"):
-            rospy.loginfo(f"Model found for patient {self.patient}. Proceeding with phase estimation.")
-            self.model = joblib.load(self.model_path + ".pkl")
-            self.model_GBR = joblib.load(self.model_path + "_GBR.pkl")
-            self.model_RFR = joblib.load(self.model_path + "_RFR.pkl")
-            self.model_VR = joblib.load(self.model_path + "_VR.pkl")
-            self.modelLoaded = True
-        else:
-            rospy.logwarn(f"Model not found for patient {self.patient}. Training a new model.")
-            res = self.train_model()
-            if res == 0:
-                rospy.signal_shutdown("Model was not found")
-
-        self.sub_pub_initialization()
-        rospy.loginfo(f"Estimating phase for patient {self.patient} using model {self.model_path}...")
-        while not rospy.is_shutdown():
-            if self.modelLoaded:
-                self.estimate_phase()
-            rate.sleep()
-
-if __name__ == '__main__':
-    try:
-        estimator = GaitPhaseEstimator()
-        estimator.run()
-    except rospy.ROSInterruptException:
-        pass
+if __name__ == "__main__":
+    main()

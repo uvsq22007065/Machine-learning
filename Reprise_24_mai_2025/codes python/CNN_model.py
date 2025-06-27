@@ -19,7 +19,7 @@ import logging
 from datetime import datetime
 
 class GaitPhaseEstimator:
-    def __init__(self, data_folder, patient_id="subject5", samples_size=10):
+    def __init__(self, data_folder, patient_id="subject8", samples_size=10):
         # Setup paths
         self.patient = patient_id
         self.base_path = os.path.abspath(data_folder)  # Convert to absolute path
@@ -57,7 +57,7 @@ class GaitPhaseEstimator:
 
         # Créer un sous-dossier avec la date et l'heure
         now = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.current_results_folder = os.path.join(self.results_folder, f"CNN_{patient_id}_final_training_{now}")
+        self.current_results_folder = os.path.join(self.results_folder, f"CNN_{patient_id}_final_training_{now}_with_prediction")
         if not os.path.exists(self.current_results_folder):
             os.makedirs(self.current_results_folder)
 
@@ -382,6 +382,15 @@ class GaitPhaseEstimator:
 
         # Model Evaluation
         y_pred = model.predict(X_test)
+
+        predictions_df = pd.DataFrame({
+            'True_Progress': y_test.flatten(),
+            'Predicted_Progress': y_pred.flatten()
+        })
+        predictions_path = os.path.join(self.current_results_folder, f"{self.patient}_predictions_{data_percentage}pct.csv")
+        predictions_df.to_csv(predictions_path, index=False)
+        print(f"Prédictions sauvegardées dans {predictions_path}")
+
         mse = mean_squared_error(y_test, y_pred)
         rmse = np.sqrt(mse)
         mae = mean_absolute_error(y_test, y_pred)
@@ -512,10 +521,10 @@ def main():
         os.makedirs(data_folder)
     
     # Fichier de données
-    data_file = os.path.join(data_folder, "subject5_labelsCNN.csv")
+    data_file = os.path.join(data_folder, "subject8_labelsCNN.csv")
     
     # Initialiser et entraîner le modèle
-    estimator = GaitPhaseEstimator(data_folder, patient_id="subject5")
+    estimator = GaitPhaseEstimator(data_folder, patient_id="subject8")
 
     if os.path.exists(data_file):
         results = estimator.train_with_multiple_percentages(data_file)
