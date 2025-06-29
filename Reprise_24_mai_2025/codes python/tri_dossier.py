@@ -13,5 +13,8 @@ for entry in os.listdir(results_dir):
         if match:
             subject_num = match.group(1)
             target_dir = os.path.join(results_dir, f"results_subject{subject_num}")
+            # Ne pas déplacer si le dossier est déjà results_subjectX
+            if os.path.abspath(entry_path) == os.path.abspath(target_dir):
+                continue
             os.makedirs(target_dir, exist_ok=True)
             shutil.move(entry_path, os.path.join(target_dir, entry))

@@ -19,7 +19,7 @@ import logging
 from datetime import datetime
 
 class GaitPhaseEstimator:
-    def __init__(self, data_folder, patient_id="subject1", samples_size=10):
+    def __init__(self, data_folder, patient_id="subject2", samples_size=10):
         # Setup paths
         self.patient = patient_id
         self.base_path = os.path.abspath(data_folder)  # Convert to absolute path
@@ -474,10 +474,10 @@ def main():
         os.makedirs(data_folder)
     
     # Fichier de données
-    data_file = os.path.join(data_folder, "subject1_labelsRNN.csv")
+    data_file = os.path.join(data_folder, "subject2_labelsRNN.csv")
     
     # Initialiser et entraîner le modèle
-    estimator = GaitPhaseEstimator(data_folder, patient_id="subject1")
+    estimator = GaitPhaseEstimator(data_folder, patient_id="subject2")
 
     if os.path.exists(data_file):
         results = estimator.train_with_multiple_percentages(data_file)
@@ -487,4 +487,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-
+    
