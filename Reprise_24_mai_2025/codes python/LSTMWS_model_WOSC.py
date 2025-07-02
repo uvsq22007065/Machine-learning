@@ -10,7 +10,6 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from tensorflow.keras.models import Sequential, load_model
 from tensorflow.keras.layers import Conv1D, MaxPooling1D, Dense, LSTM, Dropout
-from tensorflow.keras import layers, models
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.callbacks import EarlyStopping
 from joblib import dump, load
@@ -29,12 +28,11 @@ class GaitPhaseEstimator:
         if not os.path.exists(self.base_path):
             os.makedirs(self.base_path, exist_ok=True)  # Added exist_ok=True
 
-        self.log_file_path = os.path.join(self.base_path, f"{self.patient}_modelNRAX_log.txt")
+        self.log_file_path = os.path.join(self.base_path, f"{self.patient}_modelLSTM_log.txt")
         
         # Initialize parameters
         self.fs = 100
         self.force_threshold = 0.04
-        self.sequence_length = 130
         self.samples_size = samples_size
         
         # Setup filters
@@ -58,13 +56,13 @@ class GaitPhaseEstimator:
 
         # Créer un sous-dossier avec la date et l'heure
         now = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.current_results_folder = os.path.join(self.results_folder, f"NRAX_{patient_id}_final_training_{now}_with_prediction")
+        self.current_results_folder = os.path.join(self.results_folder, f"LSTMWS_{patient_id}_final_training_{now}")
         if not os.path.exists(self.current_results_folder):
             os.makedirs(self.current_results_folder)
 
-        self.labels_path = os.path.join(self.current_results_folder, f"{self.patient}_labelsNRAX.csv")
-        self.model_path = os.path.join(self.current_results_folder, f"{self.patient}_modelNRAX.keras")
-        self.scaler_path = os.path.join(self.current_results_folder, f"{self.patient}_modelNRAX_scaler.pkl")
+        self.labels_path = os.path.join(self.current_results_folder, f"{self.patient}_labelsLSTMWS.csv")
+        self.model_path = os.path.join(self.current_results_folder, f"{self.patient}_modelLSTMWS.keras")
+        self.scaler_path = os.path.join(self.current_results_folder, f"{self.patient}_modelLSTMWS_scaler.pkl")
 
     def setup_logger(self):
         logging.basicConfig(
@@ -178,14 +176,10 @@ class GaitPhaseEstimator:
         if len(cycles_angle) == 0:
             return adjusted_force, adjusted_force_derivatives, adjusted_angle, adjusted_angle_derivatives, adjusted_cop, adjusted_time, gait_phases, gait_progress
 
-        # Suppression de l'appel à select_consistent_cycles
-        # selected_indices_angle = self.select_consistent_cycles(cycles_angle, cycles_phase, percentage=90)
-        # selected_indices_force = self.select_consistent_cycles(cycles_force, cycles_phase, percentage=90)
-        # selected_indices = list(set(selected_indices_angle) & set(selected_indices_force))
-
-        # On considère que tous les cycles sont consistents
+        # Suppression de la sélection de cycles cohérents : on utilise tous les cycles extraits
         selected_indices = list(range(len(cycles_angle)))
 
+        # Reconstruction of filtered signals from selected cycles
         filtered_force = np.concatenate([cycles_force[i] for i in selected_indices])
         filtered_force_d = np.concatenate([cycles_force_deriv[i] for i in selected_indices])
         filtered_angle = np.concatenate([cycles_angle[i] for i in selected_indices])
@@ -193,79 +187,42 @@ class GaitPhaseEstimator:
         filtered_cop = np.concatenate([cycles_cop[i] for i in selected_indices])
         filtered_time = np.concatenate([cycles_time[i] for i in selected_indices])
 
+        # Phase reconstruction: if < 60%, consider stance, otherwise swing
         filtered_phase = np.concatenate([['stance_phase' if p < 60 else 'swing_phase' for p in cycles_phase[i]] for i in selected_indices])
         filtered_progress = np.concatenate([cycles_progress[i] for i in selected_indices])
 
         ptg_data = (len(filtered_time)*100.0/len(adjusted_time))
         print("Percentage of data used to train: " + str(ptg_data))
 
+        # Returns filtered signals
         return filtered_force, filtered_force_d, filtered_angle, filtered_angle_d, filtered_cop, filtered_time, filtered_phase, filtered_progress 
-
-    def build_NRAX_model(self, input_shape):
-        """Create a NRAX model with an attention mechanism."""
-        inputs = layers.Input(shape=input_shape)
-
-        x = layers.Dense(64, activation='relu')(inputs)
-        x = layers.Dropout(0.3)(x)
-        attention_output = layers.Attention()([x, x])
-        x = layers.Concatenate()([x, attention_output])
-        x = layers.Dense(32, activation='relu')(x)
-        x = layers.Dropout(0.3)(x)
-        outputs = layers.Dense(1)(x)
-
-        model = models.Model(inputs, outputs)
-        model.compile(optimizer=Adam(learning_rate=1e-4), loss='mean_squared_error')
-        return model
-
+        
     def train_model(self, data_file, data_percentage):
         print(f"Training model for patient {self.patient} with {data_percentage}% of data...")
         
         # Load data
         data = self.load_data(data_file)
         
-        # Process data (values are already in the correct format from CSV)
+        # Utiliser directement les colonnes du CSV
         angles = data['Angle'].values
         force_filtered = data['Force'].values
-        cop_data = data['CoP'].values
+        cop = data['CoP'].values
         time_data = data['Time'].values
         forces_derivative = data['Force_Derivative'].values
         angles_derivative = data['Angle_Derivative'].values
-        cop = cop_data
-
-        # Suppression de l'appel à offline_phase_estimator
-        # gait_phases, gait_progress, start_time, end_time, stance_mask = self.offline_phase_estimator(time_data, force_filtered)
-
-        # On suppose que les labels sont déjà dans le fichier
-        gait_phases = data['Phase'].values
         gait_progress = data['Gait_Progress'].values
+        gait_phases = data['Phase'].values
 
-        # On suppose que tout le vecteur est utilisable
-        min_length = min(len(time_data), len(gait_phases))
-        mask = np.ones(min_length, dtype=bool)
-        
-        # Truncate all arrays to the minimum length
-        mask = mask[:min_length]
-        gait_phases = gait_phases[:min_length]
-        gait_progress = gait_progress[:min_length]
-        time_data = time_data[:min_length]
-        force_filtered = force_filtered[:min_length]
-        angles = angles[:min_length]
-        forces_derivative = forces_derivative[:min_length]
-        angles_derivative = angles_derivative[:min_length]
-        cop = cop[:min_length]
+        # Plus besoin d'appeler offline_phase_estimator ni de découper les données
+        adjusted_time = time_data
+        adjusted_force = force_filtered
+        adjusted_angle = angles
+        adjusted_force_derivatives = forces_derivative
+        adjusted_angle_derivatives = angles_derivative
+        adjusted_cop = cop
+        adjusted_gait_phases = gait_phases
+        adjusted_gait_progress = gait_progress
 
-        # Apply mask to all data
-        adjusted_time = time_data[mask]
-        adjusted_force = force_filtered[mask]
-        adjusted_angle = angles[mask]
-        adjusted_force_derivatives = forces_derivative[mask]
-        adjusted_angle_derivatives = angles_derivative[mask]
-        adjusted_cop = cop[mask]
-        
-        # Get matching portions of phases and progress
-        adjusted_gait_phases = gait_phases[mask]
-        adjusted_gait_progress = gait_progress[mask]
-        
         # Get filtered data using create_dataset_per_cycles
         (filtered_force, filtered_force_d, filtered_angle, filtered_angle_d, 
          filtered_cop, filtered_time, filtered_phase, filtered_progress) = self.create_dataset_per_cycles(
@@ -299,26 +256,39 @@ class GaitPhaseEstimator:
         dump(scaler, self.scaler_path)
         print(f"Scaler saved to {self.scaler_path}")
 
-        X_train, X_test, y_train, y_test = train_test_split(X_scaled, y, test_size=0.2, random_state=42)
+        X = X_scaled.reshape((X_scaled.shape[0], 1, X_scaled.shape[1]))
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-        # Adjust training data size based on percentage
+        # Séquençage des données
+        sequence_length = 130
+        stride = 10
+        X_seq, y_seq = self.create_sequences(X_scaled, y, seq_length=sequence_length, stride=stride)
+
+        # Split train/test sur les séquences
+        X_train, X_test, y_train, y_test = train_test_split(X_seq, y_seq, test_size=0.2, random_state=42)
+
+        # Ajuster la taille d'entraînement selon le pourcentage
         train_size = int(len(X_train) * (data_percentage/100))
         X_train = X_train[:train_size]
         y_train = y_train[:train_size]
 
-        # NRAX + LSTM Model
-        input_shape = (X_train.shape[1],)
-        self.model = self.build_NRAX_model(input_shape)
+        # LSTM Model
+        model = Sequential()
+        model.add(LSTM(100, activation='relu', return_sequences=True, input_shape=(sequence_length, X_train.shape[2])))
+        model.add(Dropout(0.2))
+        model.add(LSTM(50, activation='relu', return_sequences=False))
+        model.add(Dropout(0.2))
+        model.add(Dense(1))
 
-        self.model.compile(optimizer=Adam(learning_rate=1e-4), loss='mean_squared_error')
+        model.compile(optimizer=Adam(learning_rate=1e-4), loss='mean_squared_error')
         early_stopping = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
 
         # Training
-        print("Training the NRAX+LSTM model...")
+        print("Training the LSTM model...")
 
         initial_time = time.time()
 
-        history = self.model.fit(
+        history = model.fit(
             X_train, y_train,
             epochs=1000,
             batch_size=32,
@@ -338,7 +308,7 @@ class GaitPhaseEstimator:
         val_loss = history.history['val_loss']
 
         # Model Evaluation
-        y_pred = self.model.predict(X_test)
+        y_pred = model.predict(X_test)
 
         predictions_df = pd.DataFrame({
             'True_Progress': y_test.flatten(),
@@ -354,21 +324,21 @@ class GaitPhaseEstimator:
         r2 = r2_score(y_test, y_pred)
 
         print(f"Performance Metrics:\nMSE={mse:.4f}, RMSE={rmse:.4f}, MAE={mae:.4f}, R²={r2:.4f}")
-        print("Last Train and Validation Loss for NRAX+LSTM Model:")
+        print("Last Train and Validation Loss for LSTM Model:")
         print(f"Train Loss={train_loss[-1]:.4f}, Validation Loss={val_loss[-1]:.4f}")
 
         # Save model with percentage in filename (changed format)
         model_path_with_pct = os.path.join(self.current_results_folder, 
-                                          f"{self.patient}_modelNRAX_{data_percentage}pct")
+                                          f"{self.patient}_modelLSTMWS_{data_percentage}pct")
         try:
-            self.model.save(model_path_with_pct)  # Removed save_format parameter
+            model.save(model_path_with_pct)  # Removed save_format parameter
             print(f"Model saved to {model_path_with_pct}")
         except Exception as e:
             print(f"Error saving model: {e}")
             
         # Save scaler with percentage in filename
         scaler_path_with_pct = os.path.join(self.current_results_folder, 
-                                           f"{self.patient}_scalerNRAX_{data_percentage}pct.pkl")
+                                           f"{self.patient}_scalerLSTMWS_{data_percentage}pct.pkl")
         dump(scaler, scaler_path_with_pct)
 
         # Save training history
@@ -409,7 +379,7 @@ class GaitPhaseEstimator:
 
         # Scale input data
         scaled_data = self.scaler.transform(input_data)
-        scaled_data = self.scaler.transform(input_data.reshape(1, -1))
+        scaled_data = scaled_data.reshape(1, self.sequence_length, 5)
 
         # Make prediction
         prediction = float(self.model.predict(scaled_data, verbose=0)[-1])
@@ -468,6 +438,16 @@ class GaitPhaseEstimator:
 
         return all_results
 
+    def create_sequences(self, data, labels, seq_length=130, stride=10):
+        """
+        Découpe les données en séquences de longueur seq_length avec un stride donné.
+        """
+        sequences, label_sequences = [], []
+        for i in range(0, len(data) - seq_length + 1, stride):
+            sequences.append(data[i:i + seq_length])
+            label_sequences.append(labels[i + seq_length - 1])
+        return np.array(sequences), np.array(label_sequences)
+
 def main():
     # Dossier racine du projet
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -478,7 +458,7 @@ def main():
         os.makedirs(data_folder)
     
     # Fichier de données
-    data_file = os.path.join(data_folder, "subject5_labelsNRAX.csv")
+    data_file = os.path.join(data_folder, "subject5_labelsLSTM.csv")
     
     # Initialiser et entraîner le modèle
     estimator = GaitPhaseEstimator(data_folder, patient_id="subject5")
@@ -491,3 +471,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
