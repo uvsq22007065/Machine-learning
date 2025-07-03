@@ -19,7 +19,7 @@ import logging
 from datetime import datetime
 
 class GaitPhaseEstimator:
-    def __init__(self, data_folder, patient_id="subject1", samples_size=10):
+    def __init__(self, data_folder, patient_id="subject5", samples_size=10):
         # Setup paths
         self.patient = patient_id
         self.base_path = os.path.abspath(data_folder)  # Convert to absolute path
@@ -28,11 +28,12 @@ class GaitPhaseEstimator:
         if not os.path.exists(self.base_path):
             os.makedirs(self.base_path, exist_ok=True)  # Added exist_ok=True
 
-        self.log_file_path = os.path.join(self.base_path, f"{self.patient}_modelLSTM_log.txt")
+        self.log_file_path = os.path.join(self.base_path, f"{self.patient}_modelCNN10stride_log.txt")
         
         # Initialize parameters
         self.fs = 100
         self.force_threshold = 0.04
+        self.sequence_length = 130
         self.samples_size = samples_size
         
         # Setup filters
@@ -56,13 +57,13 @@ class GaitPhaseEstimator:
 
         # Créer un sous-dossier avec la date et l'heure
         now = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.current_results_folder = os.path.join(self.results_folder, f"LSTMWS_{patient_id}_final_training_{now}")
+        self.current_results_folder = os.path.join(self.results_folder, f"CNN10stride_{patient_id}_final_training_{now}_with_prediction")
         if not os.path.exists(self.current_results_folder):
             os.makedirs(self.current_results_folder)
 
-        self.labels_path = os.path.join(self.current_results_folder, f"{self.patient}_labelsLSTMWS.csv")
-        self.model_path = os.path.join(self.current_results_folder, f"{self.patient}_modelLSTMWS.keras")
-        self.scaler_path = os.path.join(self.current_results_folder, f"{self.patient}_modelLSTMWS_scaler.pkl")
+        self.labels_path = os.path.join(self.current_results_folder, f"{self.patient}_labelsCNN10stride.csv")
+        self.model_path = os.path.join(self.current_results_folder, f"{self.patient}_modelCNN10stride.keras")
+        self.scaler_path = os.path.join(self.current_results_folder, f"{self.patient}_modelCNN10stride_scaler.pkl")
 
     def setup_logger(self):
         logging.basicConfig(
@@ -199,11 +200,11 @@ class GaitPhaseEstimator:
         
     def train_model(self, data_file, data_percentage):
         print(f"Training model for patient {self.patient} with {data_percentage}% of data...")
-        
+
         # Load data
         data = self.load_data(data_file)
-        
-        # Utiliser directement les colonnes du CSV
+
+        # Direct extraction (plus de mask ni de découpage)
         angles = data['Angle'].values
         force_filtered = data['Force'].values
         cop = data['CoP'].values
@@ -213,25 +214,17 @@ class GaitPhaseEstimator:
         gait_progress = data['Gait_Progress'].values
         gait_phases = data['Phase'].values
 
-        # Plus besoin d'appeler offline_phase_estimator ni de découper les données
-        adjusted_time = time_data
-        adjusted_force = force_filtered
-        adjusted_angle = angles
-        adjusted_force_derivatives = forces_derivative
-        adjusted_angle_derivatives = angles_derivative
-        adjusted_cop = cop
-        adjusted_gait_phases = gait_phases
-        adjusted_gait_progress = gait_progress
+        # Plus de create_dataset_per_cycles, on suppose les cycles déjà propres
+        filtered_force = force_filtered
+        filtered_force_d = forces_derivative
+        filtered_angle = angles
+        filtered_angle_d = angles_derivative
+        filtered_cop = cop
+        filtered_time = time_data
+        filtered_phase = gait_phases
+        filtered_progress = gait_progress
 
-        # Get filtered data using create_dataset_per_cycles
-        (filtered_force, filtered_force_d, filtered_angle, filtered_angle_d, 
-         filtered_cop, filtered_time, filtered_phase, filtered_progress) = self.create_dataset_per_cycles(
-            adjusted_force, adjusted_force_derivatives, adjusted_angle,
-            adjusted_angle_derivatives, adjusted_cop, adjusted_time, 
-            adjusted_gait_phases, adjusted_gait_progress
-        )
-
-        # Save processed data
+        # Save processed data (optionnel ici, car déjà propre)
         print(f"Saving processed data to {self.labels_path}")
         processed_data = pd.DataFrame({
             'Time': filtered_time,
@@ -252,51 +245,53 @@ class GaitPhaseEstimator:
         # Data Normalisation
         scaler = StandardScaler()
         X_scaled = scaler.fit_transform(X)
-
         dump(scaler, self.scaler_path)
         print(f"Scaler saved to {self.scaler_path}")
 
-        X = X_scaled.reshape((X_scaled.shape[0], 1, X_scaled.shape[1]))
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+        # Create Sequences
+        def create_sequences(data, labels, seq_length=130, stride=10):
+            """
+            Découpe les données en séquences de longueur seq_length avec un stride donné.
+            """
+            sequences, label_sequences = [], []
+            for i in range(0, len(data) - seq_length + 1, stride):
+                sequences.append(data[i:i + seq_length])
+                label_sequences.append(labels[i + seq_length - 1])
+            return np.array(sequences), np.array(label_sequences)
 
-        # Séquençage des données
-        sequence_length = 50
-        stride = 10
-        X_seq, y_seq = self.create_sequences(X_scaled, y, seq_length=sequence_length, stride=stride)
-
-        # Split train/test sur les séquences
+        X_seq, y_seq = create_sequences(X_scaled, y, self.sequence_length)
         X_train, X_test, y_train, y_test = train_test_split(X_seq, y_seq, test_size=0.2, random_state=42)
 
-        # Ajuster la taille d'entraînement selon le pourcentage
+        # Adjust training data size based on percentage
         train_size = int(len(X_train) * (data_percentage/100))
         X_train = X_train[:train_size]
         y_train = y_train[:train_size]
 
-        # LSTM Model
-        model = Sequential()
-        model.add(LSTM(100, activation='relu', return_sequences=True, input_shape=(sequence_length, X_train.shape[2])))
-        model.add(Dropout(0.2))
-        model.add(LSTM(50, activation='relu', return_sequences=False))
-        model.add(Dropout(0.2))
-        model.add(Dense(1))
+        # CNN + LSTM Model
+        model = Sequential([
+            Conv1D(128, kernel_size=3, activation='relu', input_shape=(X_train.shape[1], X_train.shape[2])),
+            MaxPooling1D(pool_size=2), Dropout(0.3), 
+            Conv1D(64, kernel_size=3, activation='relu'),
+            MaxPooling1D(pool_size=2), Dropout(0.3),
+            LSTM(50, return_sequences=False), Dropout(0.3),
+            Dense(32, activation='relu'), Dropout(0.2), 
+            Dense(1, activation='linear')
+        ])
 
         model.compile(optimizer=Adam(learning_rate=1e-4), loss='mean_squared_error')
-        early_stopping = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
+        early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
 
         # Training
-        print("Training the LSTM model...")
-
+        print("Training the CNN+LSTM model...")
         initial_time = time.time()
-
         history = model.fit(
             X_train, y_train,
             epochs=1000,
             batch_size=32,
-            verbose=1,  # Changed from 0 to 1
+            verbose=1,
             validation_split=0.2,
             callbacks=[early_stopping]
         )
-
         final_time = time.time()
 
         # Calculate and print elapsed time
@@ -309,7 +304,6 @@ class GaitPhaseEstimator:
 
         # Model Evaluation
         y_pred = model.predict(X_test)
-
         predictions_df = pd.DataFrame({
             'True_Progress': y_test.flatten(),
             'Predicted_Progress': y_pred.flatten()
@@ -324,29 +318,26 @@ class GaitPhaseEstimator:
         r2 = r2_score(y_test, y_pred)
 
         print(f"Performance Metrics:\nMSE={mse:.4f}, RMSE={rmse:.4f}, MAE={mae:.4f}, R²={r2:.4f}")
-        print("Last Train and Validation Loss for LSTM Model:")
+        print("Last Train and Validation Loss for CNN+LSTM Model:")
         print(f"Train Loss={train_loss[-1]:.4f}, Validation Loss={val_loss[-1]:.4f}")
 
-        # Save model with percentage in filename (changed format)
-        model_path_with_pct = os.path.join(self.current_results_folder, 
-                                          f"{self.patient}_modelLSTMWS_{data_percentage}pct")
+        # Save model with percentage in filename
+        model_path_with_pct = os.path.join(self.current_results_folder, f"{self.patient}_modelCNN_{data_percentage}pct")
         try:
-            model.save(model_path_with_pct)  # Removed save_format parameter
+            model.save(model_path_with_pct)
             print(f"Model saved to {model_path_with_pct}")
         except Exception as e:
             print(f"Error saving model: {e}")
-            
+
         # Save scaler with percentage in filename
-        scaler_path_with_pct = os.path.join(self.current_results_folder, 
-                                           f"{self.patient}_scalerLSTMWS_{data_percentage}pct.pkl")
+        scaler_path_with_pct = os.path.join(self.current_results_folder, f"{self.patient}_scalerCNN_{data_percentage}pct.pkl")
         dump(scaler, scaler_path_with_pct)
 
         # Save training history
         history_dict = history.history
         history_dict['epochs'] = list(range(1, len(train_loss) + 1))
         history_df = pd.DataFrame(history_dict)
-        history_path = os.path.join(self.current_results_folder, 
-                                   f"{self.patient}_history_{data_percentage}pct.csv")
+        history_path = os.path.join(self.current_results_folder, f"{self.patient}_history_{data_percentage}pct.csv")
         history_df.to_csv(history_path, index=False)
 
         return {
@@ -436,38 +427,24 @@ class GaitPhaseEstimator:
         plt.savefig(metrics_plot_path)
         plt.close()
 
-        return all_results
-
-    def create_sequences(self, data, labels, seq_length=50, stride=10):
-        """
-        Découpe les données en séquences de longueur seq_length avec un stride donné.
-        """
-        sequences, label_sequences = [], []
-        for i in range(0, len(data) - seq_length + 1, stride):
-            sequences.append(data[i:i + seq_length])
-            label_sequences.append(labels[i + seq_length - 1])
-        return np.array(sequences), np.array(label_sequences)
-
 def main():
     # Dossier racine du projet
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    
-    # Chemin vers le dossier de données
     data_folder = os.path.join(project_root, "train_data_filtered_labeled_csv")
-    if not os.path.exists(data_folder):
-        os.makedirs(data_folder)
-    
-    # Fichier de données
-    data_file = os.path.join(data_folder, "subject1_labelsLSTM.csv")
-    
-    # Initialiser et entraîner le modèle
-    estimator = GaitPhaseEstimator(data_folder, patient_id="subject1")
 
-    if os.path.exists(data_file):
-        results = estimator.train_with_multiple_percentages(data_file)
-        print("Entraînement terminé. Les résultats ont été sauvegardés dans:", estimator.current_results_folder)
-    else:
-        print(f"Erreur: Le fichier {data_file} n'existe pas")
+    # Liste des sujets à traiter
+    subjects = ["subject1", "subject2", "subject3", "subject4", "subject5", "subject6", "subject7", "subject8"]
+
+    for subject in subjects:
+        data_file = os.path.join(data_folder, f"{subject}_labelsCNN.csv")
+        estimator = GaitPhaseEstimator(data_folder, patient_id=subject)
+
+        if os.path.exists(data_file):
+            print(f"\n=== Lancement pour {subject} ===")
+            results = estimator.train_with_multiple_percentages(data_file)
+            print("Entraînement terminé. Les résultats ont été sauvegardés dans:", estimator.current_results_folder)
+        else:
+            print(f"Erreur: Le fichier {data_file} n'existe pas")
 
 if __name__ == "__main__":
     main()

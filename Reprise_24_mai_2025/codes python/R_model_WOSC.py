@@ -16,7 +16,7 @@ from scipy.signal import butter, filtfilt
 import logging
 
 class GaitPhaseEstimator:
-    def __init__(self, data_folder, patient_id="subject6", samples_size=10):
+    def __init__(self, data_folder, patient_id="subject8", samples_size=10):
         self.patient = patient_id
         self.base_path = os.path.abspath(data_folder)
         
@@ -493,10 +493,10 @@ def main():
         os.makedirs(data_folder)
     
     # Data file
-    data_file = os.path.join(data_folder, "subject6_labelsR.csv")
+    data_file = os.path.join(data_folder, "subject8_labelsR.csv")
     
     # Initialize and train model
-    estimator = GaitPhaseEstimator(data_folder, patient_id="subject6")
+    estimator = GaitPhaseEstimator(data_folder, patient_id="subject8")
 
     if os.path.exists(data_file):
         results = estimator.train_with_multiple_percentages(data_file)

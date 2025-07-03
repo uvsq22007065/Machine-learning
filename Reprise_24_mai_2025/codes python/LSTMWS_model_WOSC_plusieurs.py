@@ -260,7 +260,7 @@ class GaitPhaseEstimator:
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
         # Séquençage des données
-        sequence_length = 50
+        sequence_length = 130
         stride = 10
         X_seq, y_seq = self.create_sequences(X_scaled, y, seq_length=sequence_length, stride=stride)
 
@@ -451,23 +451,21 @@ class GaitPhaseEstimator:
 def main():
     # Dossier racine du projet
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    
-    # Chemin vers le dossier de données
     data_folder = os.path.join(project_root, "train_data_filtered_labeled_csv")
-    if not os.path.exists(data_folder):
-        os.makedirs(data_folder)
-    
-    # Fichier de données
-    data_file = os.path.join(data_folder, "subject1_labelsLSTM.csv")
-    
-    # Initialiser et entraîner le modèle
-    estimator = GaitPhaseEstimator(data_folder, patient_id="subject1")
 
-    if os.path.exists(data_file):
-        results = estimator.train_with_multiple_percentages(data_file)
-        print("Entraînement terminé. Les résultats ont été sauvegardés dans:", estimator.current_results_folder)
-    else:
-        print(f"Erreur: Le fichier {data_file} n'existe pas")
+    # Liste des sujets à traiter
+    subjects = ["subject1", "subject2", "subject3", "subject4", "subject5","subject6", "subject7", "subject8"]
+
+    for subject in subjects:
+        data_file = os.path.join(data_folder, f"{subject}_labelsLSTM.csv")
+        estimator = GaitPhaseEstimator(data_folder, patient_id=subject)
+
+        if os.path.exists(data_file):
+            print(f"\n=== Lancement pour {subject} ===")
+            results = estimator.train_with_multiple_percentages(data_file)
+            print("Entraînement terminé. Les résultats ont été sauvegardés dans:", estimator.current_results_folder)
+        else:
+            print(f"Erreur: Le fichier {data_file} n'existe pas")
 
 if __name__ == "__main__":
     main()
