@@ -2,7 +2,7 @@ import pandas as pd
 import os
 
 # Définir les chemins des dossiers
-source_folder = "Reprise_24_mai_2025\\train_data_labeled"
+source_folder = "Reprise_24_mai_2025\\fichiers_rajoutés\\drive-download-20250709T170322Z-"
 destination_folder = "Reprise_24_mai_2025\\train_data_filtered_labeled_csv"
 
 # Créer le dossier de destination s'il n'existe pas

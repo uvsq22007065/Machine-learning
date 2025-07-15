@@ -162,15 +162,15 @@ class GaitPhaseEstimator:
 
             metrics = self.calculate_metrics(y_test, y_pred)
             metrics['training_duration'] = training_duration
-            metrics['last_train_loss'] = train_loss[-1]
-            metrics['last_val_loss'] = val_loss[-1]
+            metrics['final_train_loss'] = train_loss[-1]
+            metrics['final_val_loss'] = val_loss[-1]
             results[name] = metrics
 
             self.save_model_artifacts(name, model, data_percentage, y_test, y_pred)
             self.plot_predictions(y_test, y_pred, name, data_percentage)
 
             # 🔁 Ajout : tracer train/val loss
-            self.plot_training_history(train_loss, val_loss, epochs, name, data_percentage)
+            # self.plot_training_history(train_loss, val_loss, epochs, name, data_percentage)
             # 🔽 Sauvegarde complète de la courbe de loss dans un CSV
             loss_df = pd.DataFrame({
                 'epoch': epochs,
@@ -189,7 +189,7 @@ class GaitPhaseEstimator:
 
         # Save detailed results and create additional visualizations
         self.save_detailed_results(results, data_percentage)
-        self.plot_performance_metrics(results, data_percentage)
+        # self.plot_performance_metrics(results, data_percentage)
 
         return results
 
@@ -268,8 +268,8 @@ class GaitPhaseEstimator:
                     'mae': model_results['mae'],
                     'r2': model_results['r2'],
                     'training_duration': model_results['training_duration'],
-                    'last_train_loss': model_results.get('last_train_loss', None),
-                    'last_val_loss': model_results.get('last_val_loss', None)
+                    'final_train_loss': model_results.get('final_train_loss', None),
+                    'final_val_loss': model_results.get('final_val_loss', None)
                 }
                 all_results.append(result_entry)
                 
@@ -520,25 +520,23 @@ class GaitPhaseEstimator:
         results_df.to_csv(detailed_results_path, index=False)
 
 def main():
-    # Project root directory
+    # Dossier racine du projet
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    
-    # Data folder path
     data_folder = os.path.join(project_root, "train_data_filtered_labeled_csv")
-    if not os.path.exists(data_folder):
-        os.makedirs(data_folder)
-    
-    # Data file
-    data_file = os.path.join(data_folder, "subject9_labelsR.csv")
-    
-    # Initialize and train model
-    estimator = GaitPhaseEstimator(data_folder, patient_id="subject9")
 
-    if os.path.exists(data_file):
-        results = estimator.train_with_multiple_percentages(data_file)
-        print("Training completed. Results saved in:", estimator.current_results_folder)
-    else:
-        print(f"Error: File {data_file} does not exist")
+    # Liste des sujets à traiter
+    subjects = ["subject1", "subject2", "subject3", "subject4", "subject5","subject6", "subject7", "subject8","subject9", "subject10", "subject11"]
+
+    for subject in subjects:
+        data_file = os.path.join(data_folder, f"{subject}_labelsR.csv")
+        estimator = GaitPhaseEstimator(data_folder, patient_id=subject)
+
+        if os.path.exists(data_file):
+            print(f"\n=== Lancement pour {subject} ===")
+            results = estimator.train_with_multiple_percentages(data_file)
+            print("Entraînement terminé. Les résultats ont été sauvegardés dans:", estimator.current_results_folder)
+        else:
+            print(f"Erreur: Le fichier {data_file} n'existe pas")
 
 if __name__ == "__main__":
     main()

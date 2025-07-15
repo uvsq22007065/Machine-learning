@@ -38,6 +38,8 @@ def merge_csvs_to_mat(input_folder, output_mat_path):
                     continue
                 if "predictions" in file.lower():
                     continue
+                if "processed_data" in file.lower():
+                    continue
                 file_path = os.path.join(root, file)
                 model_folder = os.path.basename(root)
                 # Détection spéciale pour les overall_results
@@ -174,6 +176,6 @@ def merge_csvs_to_mat(input_folder, output_mat_path):
     progress_thread.join()
 
 # Exemple d'utilisation
-input_folder = r'Reprise_24_mai_2025\\results\\results_subject1'  # Remplace par ton dossier principal contenant les sous-dossiers de modèles
-output_mat_path = r'Reprise_24_mai_2025\\results\\fusion\\fusion_version_definitive_WOL_subject1.mat'  # Remplace par le chemin de sortie
+input_folder = r'Reprise_24_mai_2025\\results\\results_subject11'  # Remplace par ton dossier principal contenant les sous-dossiers de modèles
+output_mat_path = r'Reprise_24_mai_2025\\results\\fusion\\fusion_subject11.mat'  # Remplace par le chemin de sortie
 merge_csvs_to_mat(input_folder, output_mat_path)

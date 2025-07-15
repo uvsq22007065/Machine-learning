@@ -19,7 +19,7 @@ import logging
 from datetime import datetime
 
 class GaitPhaseEstimator:
-    def __init__(self, data_folder, patient_id="subject1", samples_size=10):
+    def __init__(self, data_folder, patient_id="subject11", samples_size=10):
         # Setup paths
         self.patient = patient_id
         self.base_path = os.path.abspath(data_folder)  # Convert to absolute path
@@ -260,8 +260,8 @@ class GaitPhaseEstimator:
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
         # Séquençage des données
-        sequence_length = 50
-        stride = 10
+        sequence_length = 16
+        stride = 1
         X_seq, y_seq = self.create_sequences(X_scaled, y, seq_length=sequence_length, stride=stride)
 
         # Split train/test sur les séquences
@@ -438,7 +438,7 @@ class GaitPhaseEstimator:
 
         return all_results
 
-    def create_sequences(self, data, labels, seq_length=50, stride=10):
+    def create_sequences(self, data, labels, seq_length=16, stride=1):
         """
         Découpe les données en séquences de longueur seq_length avec un stride donné.
         """
@@ -458,10 +458,10 @@ def main():
         os.makedirs(data_folder)
     
     # Fichier de données
-    data_file = os.path.join(data_folder, "subject1_labelsLSTM.csv")
+    data_file = os.path.join(data_folder, "subject11_labelsLSTM.csv")
     
     # Initialiser et entraîner le modèle
-    estimator = GaitPhaseEstimator(data_folder, patient_id="subject1")
+    estimator = GaitPhaseEstimator(data_folder, patient_id="subject11")
 
     if os.path.exists(data_file):
         results = estimator.train_with_multiple_percentages(data_file)

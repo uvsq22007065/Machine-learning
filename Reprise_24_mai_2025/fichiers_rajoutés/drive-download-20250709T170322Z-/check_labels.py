@@ -41,5 +41,5 @@ def analyze_subject(subject_number):
 folder_path = os.path.dirname(os.path.abspath(__file__))
 
 # Analyser chaque sujet
-for subject in range(5, 8):
+for subject in range(9, 12):
     analyze_subject(subject)

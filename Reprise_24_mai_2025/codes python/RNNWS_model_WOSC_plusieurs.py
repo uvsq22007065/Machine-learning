@@ -17,6 +17,8 @@ from collections import deque
 import time
 import logging
 from datetime import datetime
+from tensorflow.keras import backend as K
+import glob
 
 class GaitPhaseEstimator:
     def __init__(self, data_folder, patient_id="subject1", samples_size=10):
@@ -28,7 +30,7 @@ class GaitPhaseEstimator:
         if not os.path.exists(self.base_path):
             os.makedirs(self.base_path, exist_ok=True)  # Added exist_ok=True
 
-        self.log_file_path = os.path.join(self.base_path, f"{self.patient}_modelRNNWS_log.txt")
+        self.log_file_path = os.path.join(self.base_path, f"{self.patient}_modelRNNWS1stride16sequences_log.txt")
         
         # Initialize parameters
         self.fs = 100
@@ -57,13 +59,13 @@ class GaitPhaseEstimator:
 
         # Créer un sous-dossier avec la date et l'heure
         now = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.current_results_folder = os.path.join(self.results_folder, f"RNNWS_{patient_id}_final_training_{now}_with_prediction")
+        self.current_results_folder = os.path.join(self.results_folder, f"RNNWS1stride16sequences_{patient_id}_final_training_{now}_with_prediction")
         if not os.path.exists(self.current_results_folder):
             os.makedirs(self.current_results_folder)
 
-        self.labels_path = os.path.join(self.current_results_folder, f"{self.patient}_labelsRNNWS.csv")
-        self.model_path = os.path.join(self.current_results_folder, f"{self.patient}_modelRNNWS.keras")
-        self.scaler_path = os.path.join(self.current_results_folder, f"{self.patient}_modelRNNWS_scaler.pkl")
+        self.labels_path = os.path.join(self.current_results_folder, f"{self.patient}_labelsRNNWS1stride16sequences.csv")
+        self.model_path = os.path.join(self.current_results_folder, f"{self.patient}_modelRNNWS1stride16sequences.keras")
+        self.scaler_path = os.path.join(self.current_results_folder, f"{self.patient}_modelRNNWS1stride16sequences_scaler.pkl")
 
     def setup_logger(self):
         logging.basicConfig(
@@ -200,7 +202,7 @@ class GaitPhaseEstimator:
 
         return filtered_force, filtered_force_d, filtered_angle, filtered_angle_d, filtered_cop, filtered_time, filtered_phase, filtered_progress 
         
-    def create_sequences(self, data, labels, seq_length=130, stride=10):
+    def create_sequences(self, data, labels, seq_length=16, stride=1):
         """
         Découpe les données en séquences de longueur seq_length avec un stride donné.
         """
@@ -293,8 +295,8 @@ class GaitPhaseEstimator:
         print(f"Scaler saved to {self.scaler_path}")
 
         # --- AJOUT DU SEQUENCAGE ---
-        sequence_length = 130
-        stride = 10
+        sequence_length = 16
+        stride = 1
         X_seq, y_seq = self.create_sequences(X_scaled, y, seq_length=sequence_length, stride=stride)
 
         # Split the data
@@ -305,7 +307,7 @@ class GaitPhaseEstimator:
         X_train = X_train[:train_size]
         y_train = y_train[:train_size]
 
-        # RNNWS + LSTM Model
+        # RNNWS1stride16sequences + LSTM Model
         model = Sequential()
         model.add(LSTM(128, activation='tanh', return_sequences=True, input_shape=(sequence_length, X_train.shape[2])))
         model.add(Dropout(0.3))
@@ -319,7 +321,7 @@ class GaitPhaseEstimator:
         early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
 
         # Training
-        print("Training the RNNWS+LSTM model...")
+        print("Training the RNNWS1stride16sequences model...")
 
         initial_time = time.time()
 
@@ -359,12 +361,12 @@ class GaitPhaseEstimator:
         r2 = r2_score(y_test, y_pred)
 
         print(f"Performance Metrics:\nMSE={mse:.4f}, RMSE={rmse:.4f}, MAE={mae:.4f}, R²={r2:.4f}")
-        print("Last Train and Validation Loss for RNNWS+LSTM Model:")
+        print("Last Train and Validation Loss for RNNWS1stride16sequences Model:")
         print(f"Train Loss={train_loss[-1]:.4f}, Validation Loss={val_loss[-1]:.4f}")
 
         # Save model with percentage in filename (changed format)
         model_path_with_pct = os.path.join(self.current_results_folder, 
-                                          f"{self.patient}_modelRNNWS_{data_percentage}pct")
+                                          f"{self.patient}_modelRNNWS1stride16sequences_{data_percentage}pct")
         try:
             model.save(model_path_with_pct)  # Removed save_format parameter
             print(f"Model saved to {model_path_with_pct}")
@@ -373,7 +375,7 @@ class GaitPhaseEstimator:
             
         # Save scaler with percentage in filename
         scaler_path_with_pct = os.path.join(self.current_results_folder, 
-                                           f"{self.patient}_scalerRNNWS_{data_percentage}pct.pkl")
+                                           f"{self.patient}_scalerRNNWS1stride16sequences_{data_percentage}pct.pkl")
         dump(scaler, scaler_path_with_pct)
 
         # Save training history
@@ -383,6 +385,31 @@ class GaitPhaseEstimator:
         history_path = os.path.join(self.current_results_folder, 
                                    f"{self.patient}_history_{data_percentage}pct.csv")
         history_df.to_csv(history_path, index=False)
+
+        # --- Complétion dynamique du CSV des résultats ---
+        results_file = os.path.join(self.current_results_folder, f"{self.patient}_overall_results.csv")
+        new_result = {
+            'data_percentage': data_percentage,
+            'mse': mse,
+            'rmse': rmse,
+            'mae': mae,
+            'r2': r2,
+            'training_duration': training_duration,
+            'final_train_loss': train_loss[-1],
+            'final_val_loss': val_loss[-1],
+            'total_epochs': len(train_loss)
+        }
+        # Charger l'ancien CSV s'il existe, sinon créer un DataFrame vide
+        if os.path.exists(results_file):
+            old_results = pd.read_csv(results_file)
+            # Supprimer la ligne du pourcentage courant s'il existe déjà
+            old_results = old_results[old_results['data_percentage'] != data_percentage]
+            all_results = pd.concat([old_results, pd.DataFrame([new_result])], ignore_index=True)
+        else:
+            all_results = pd.DataFrame([new_result])
+        # Sauvegarder le CSV mis à jour
+        all_results = all_results.sort_values("data_percentage")
+        all_results.to_csv(results_file, index=False)
 
         return {
             'data_percentage': data_percentage,
@@ -414,7 +441,7 @@ class GaitPhaseEstimator:
 
         # Scale input data
         scaled_data = self.scaler.transform(input_data)
-        scaled_data = scaled_data.reshape(1, 130, 5)
+        scaled_data = scaled_data.reshape(1, 16, 5)
 
         # Make prediction
         prediction = float(self.model.predict(scaled_data, verbose=0)[-1])
@@ -477,20 +504,59 @@ def main():
     # Dossier racine du projet
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     data_folder = os.path.join(project_root, "train_data_filtered_labeled_csv")
+    results_folder = os.path.join(project_root, "results")
+    percentages = [10, 20, 40, 60, 80, 100]
 
-    # Liste des sujets à traiter
-    subjects = ["subject2", "subject3", "subject4", "subject5","subject6", "subject7", "subject8"]
+    subjects = ["subject7", "subject8"]
 
     for subject in subjects:
         data_file = os.path.join(data_folder, f"{subject}_labelsRNN.csv")
+        # Cherche le dossier le plus récent pour ce sujet
+        subject_dirs = sorted(
+            glob.glob(os.path.join(results_folder, f"RNNWS1stride16sequences_{subject}_final_training_*")),
+            reverse=True
+        )
+        if subject_dirs:
+            current_results_folder = subject_dirs[0]
+        else:
+            current_results_folder = None
+
+        # Vérifie les fichiers attendus
+        missing_percentages = []
+        for pct in percentages:
+            model_path = os.path.join(
+                current_results_folder if current_results_folder else "",
+                f"{subject}_modelRNNWS1stride16sequences_{pct}pct"
+            )
+            scaler_path = os.path.join(
+                current_results_folder if current_results_folder else "",
+                f"{subject}_scalerRNNWS1stride16sequences_{pct}pct.pkl"
+            )
+            history_path = os.path.join(
+                current_results_folder if current_results_folder else "",
+                f"{subject}_history_{pct}pct.csv"
+            )
+            if not (os.path.exists(model_path) and os.path.exists(scaler_path) and os.path.exists(history_path)):
+                missing_percentages.append(pct)
+
+        if not missing_percentages:
+            print(f"Tous les fichiers pour {subject} sont déjà présents, rien à faire.")
+            continue
+
+        print(f"Pour {subject}, il manque les pourcentages suivants : {missing_percentages}")
+
         estimator = GaitPhaseEstimator(data_folder, patient_id=subject)
+        # Si un dossier existe déjà, on le réutilise
+        if current_results_folder:
+            estimator.current_results_folder = current_results_folder
 
         if os.path.exists(data_file):
-            print(f"\n=== Lancement pour {subject} ===")
-            results = estimator.train_with_multiple_percentages(data_file)
-            print("Entraînement terminé. Les résultats ont été sauvegardés dans:", estimator.current_results_folder)
+            for pct in missing_percentages:
+                print(f"\n=== Lancement pour {subject} avec {pct}% de données ===")
+                estimator.train_model(data_file, pct)
         else:
             print(f"Erreur: Le fichier {data_file} n'existe pas")
+        K.clear_session()
 
 if __name__ == "__main__":
     main()

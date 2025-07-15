@@ -19,7 +19,7 @@ import logging
 from datetime import datetime
 
 class GaitPhaseEstimator:
-    def __init__(self, data_folder, patient_id="subject1", samples_size=10):
+    def __init__(self, data_folder, patient_id="subject11", samples_size=10):
         # Setup paths
         self.patient = patient_id
         self.base_path = os.path.abspath(data_folder)  # Convert to absolute path
@@ -28,7 +28,7 @@ class GaitPhaseEstimator:
         if not os.path.exists(self.base_path):
             os.makedirs(self.base_path, exist_ok=True)  # Added exist_ok=True
 
-        self.log_file_path = os.path.join(self.base_path, f"{self.patient}_modelRNNWS_log.txt")
+        self.log_file_path = os.path.join(self.base_path, f"{self.patient}_modelRNNWS1stride16sequences_log.txt")
         
         # Initialize parameters
         self.fs = 100
@@ -57,13 +57,13 @@ class GaitPhaseEstimator:
 
         # Créer un sous-dossier avec la date et l'heure
         now = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.current_results_folder = os.path.join(self.results_folder, f"RNNWS_{patient_id}_final_training_{now}_with_prediction")
+        self.current_results_folder = os.path.join(self.results_folder, f"RNNWS1stride16sequences_{patient_id}_final_training_{now}_with_prediction")
         if not os.path.exists(self.current_results_folder):
             os.makedirs(self.current_results_folder)
 
-        self.labels_path = os.path.join(self.current_results_folder, f"{self.patient}_labelsRNNWS.csv")
-        self.model_path = os.path.join(self.current_results_folder, f"{self.patient}_modelRNNWS.keras")
-        self.scaler_path = os.path.join(self.current_results_folder, f"{self.patient}_modelRNNWS_scaler.pkl")
+        self.labels_path = os.path.join(self.current_results_folder, f"{self.patient}_labelsRNNWS1stride16sequences.csv")
+        self.model_path = os.path.join(self.current_results_folder, f"{self.patient}_modelRNNWS1stride16sequences.keras")
+        self.scaler_path = os.path.join(self.current_results_folder, f"{self.patient}_modelRNNWS1stride16sequences_scaler.pkl")
 
     def setup_logger(self):
         logging.basicConfig(
@@ -198,9 +198,9 @@ class GaitPhaseEstimator:
         ptg_data = (len(filtered_time)*100.0/len(adjusted_time))
         print("Percentage of data used to train: " + str(ptg_data))
 
-        return filtered_force, filtered_force_d, filtered_angle, filtered_angle_d, filtered_cop, filtered_time, filtered_phase, filtered_progress 
-        
-    def create_sequences(self, data, labels, seq_length=130, stride=10):
+        return filtered_force, filtered_force_d, filtered_angle, filtered_angle_d, filtered_cop, filtered_time, filtered_phase, filtered_progress
+
+    def create_sequences(self, data, labels, seq_length=16, stride=1):
         """
         Découpe les données en séquences de longueur seq_length avec un stride donné.
         """
@@ -293,8 +293,8 @@ class GaitPhaseEstimator:
         print(f"Scaler saved to {self.scaler_path}")
 
         # --- AJOUT DU SEQUENCAGE ---
-        sequence_length = 130
-        stride = 10
+        sequence_length = 16
+        stride = 1
         X_seq, y_seq = self.create_sequences(X_scaled, y, seq_length=sequence_length, stride=stride)
 
         # Split the data
@@ -305,7 +305,7 @@ class GaitPhaseEstimator:
         X_train = X_train[:train_size]
         y_train = y_train[:train_size]
 
-        # RNNWS + LSTM Model
+        # RNNWS1stride16sequences + LSTM Model
         model = Sequential()
         model.add(LSTM(128, activation='tanh', return_sequences=True, input_shape=(sequence_length, X_train.shape[2])))
         model.add(Dropout(0.3))
@@ -319,7 +319,7 @@ class GaitPhaseEstimator:
         early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
 
         # Training
-        print("Training the RNNWS+LSTM model...")
+        print("Training the RNNWS1stride16sequences+LSTM model...")
 
         initial_time = time.time()
 
@@ -359,12 +359,12 @@ class GaitPhaseEstimator:
         r2 = r2_score(y_test, y_pred)
 
         print(f"Performance Metrics:\nMSE={mse:.4f}, RMSE={rmse:.4f}, MAE={mae:.4f}, R²={r2:.4f}")
-        print("Last Train and Validation Loss for RNNWS+LSTM Model:")
+        print("Last Train and Validation Loss for RNNWS1stride16sequences+LSTM Model:")
         print(f"Train Loss={train_loss[-1]:.4f}, Validation Loss={val_loss[-1]:.4f}")
 
         # Save model with percentage in filename (changed format)
         model_path_with_pct = os.path.join(self.current_results_folder, 
-                                          f"{self.patient}_modelRNNWS_{data_percentage}pct")
+                                          f"{self.patient}_modelRNNWS1stride16sequences_{data_percentage}pct")
         try:
             model.save(model_path_with_pct)  # Removed save_format parameter
             print(f"Model saved to {model_path_with_pct}")
@@ -373,7 +373,7 @@ class GaitPhaseEstimator:
             
         # Save scaler with percentage in filename
         scaler_path_with_pct = os.path.join(self.current_results_folder, 
-                                           f"{self.patient}_scalerRNNWS_{data_percentage}pct.pkl")
+                                           f"{self.patient}_scalerRNNWS1stride16sequences_{data_percentage}pct.pkl")
         dump(scaler, scaler_path_with_pct)
 
         # Save training history
@@ -414,7 +414,7 @@ class GaitPhaseEstimator:
 
         # Scale input data
         scaled_data = self.scaler.transform(input_data)
-        scaled_data = scaled_data.reshape(1, 130, 5)
+        scaled_data = scaled_data.reshape(1, 16, 5)
 
         # Make prediction
         prediction = float(self.model.predict(scaled_data, verbose=0)[-1])
@@ -483,10 +483,10 @@ def main():
         os.makedirs(data_folder)
     
     # Fichier de données
-    data_file = os.path.join(data_folder, "subject1_labelsRNN.csv")
+    data_file = os.path.join(data_folder, "subject11_labelsRNN.csv")
     
     # Initialiser et entraîner le modèle
-    estimator = GaitPhaseEstimator(data_folder, patient_id="subject1")
+    estimator = GaitPhaseEstimator(data_folder, patient_id="subject11")
 
     if os.path.exists(data_file):
         results = estimator.train_with_multiple_percentages(data_file)
