@@ -45,7 +45,7 @@ for subject_id in range(1, 12):
 # Étape 2 : Concaténer tous les fichiers
 all_df = pd.concat(all_data, ignore_index=True)
 # === Filtrer certains modèles à ignorer ===
-models_to_ignore = []
+models_to_ignore = ['RNNWS', 'LSTMWS']
 all_df = all_df[~all_df['model'].isin(models_to_ignore)]
 
 
@@ -70,7 +70,7 @@ for metric in metrics:
     plt.legend()
     plt.tight_layout()
 
-    output_path = os.path.join(root_dir, f"average_subjectsto10_{metric}_comparison.svg")
+    output_path = os.path.join(root_dir, f"average_subjectsfinals_{metric}_comparison.svg")
     plt.savefig(output_path)
     plt.close()
     print(f"[✓] Fichier sauvegardé : {output_path}")
